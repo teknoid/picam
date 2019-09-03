@@ -1,0 +1,11 @@
+[Unit]
+Description=PICAM Master Control Program
+After=network.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/mcp
+
+[Install]
+WantedBy=multi-user.target
