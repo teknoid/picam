@@ -1,6 +1,6 @@
 [Unit]
 Description=PICAM Master Control Program
-After=network.service
+After=network.service mnt-work.mount
 
 [Service]
 Type=simple

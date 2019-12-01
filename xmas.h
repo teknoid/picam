@@ -15,7 +15,7 @@
 #define FLAMINGOSEND	"/usr/local/bin/flamingosend"
 
 // light on: ↑later ↓earlier
-#define XMAS_SUNDOWN	3300
+#define XMAS_SUNDOWN	3100
 
 // light off: ↑earlier, ↓later
 #define XMAS_SUNRISE	3000
