@@ -22,10 +22,10 @@ static void flamingosend(char *cmd) {
 	strcpy(command, FLAMINGOSEND);
 	strcat(command, " ");
 	strcat(command, cmd);
-	for (i = 0; i < 3; i++) {
-		syslog(LOG_NOTICE, "executing %s", command);
-		system(command);
-		sleep(5);
+	for (i = 0; i < 5; i++) {
+		int ret = system(command);
+		syslog(LOG_NOTICE, "executed %s returned %d", command, ret);
+		sleep(1);
 	}
 }
 
