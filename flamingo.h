@@ -1,7 +1,7 @@
 #define RX 					2
 #define TX  				0
 
-// min 180 max 350
+// tested with 1 C 1: min 180 max 350
 #define PULSE 				250
 
 // we use 49 as the PRREMPT_RT use 50 as the priority of kernel tasklets and interrupt handler by default
