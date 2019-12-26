@@ -51,11 +51,6 @@ static void _send(uint32_t code) {
 			}
 		}
 	}
-	// send sync
-	digitalWrite(TX, 1);
-	_delay(PULSE * 1);
-	digitalWrite(TX, 0);
-	_delay(PULSE * 15);
 }
 
 static void send(char remote, char channel, char command, char offset) {
