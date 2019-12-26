@@ -7,6 +7,9 @@
 // we use 49 as the PRREMPT_RT use 50 as the priority of kernel tasklets and interrupt handler by default
 #define SCHED_PRIO 			49
 
+// command length is 28 bits
+#define CODE_LENGTH			28
+
 #define REMOTES				4
 uint32_t FLAMINGO[REMOTES * 4][8] = {
 

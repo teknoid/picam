@@ -27,34 +27,35 @@ static void _delay(unsigned int millis) {
 }
 
 static void _send(uint32_t code) {
-	uint32_t msb = 0b1000000000000000000000000000;	// the 28th MSB bit	(Flamingo command is only 28 bits)
-	uint32_t codeRepeat = code;
-	uint16_t repeat, i;
-
-	for (repeat = 0; repeat < 4; repeat++) {
+	// at least 1 repeat is necessary
+	for (int repeat = 0; repeat < 5; repeat++) {
 		// send sync
-		digitalWrite(TX, HIGH);
+		digitalWrite(TX, 1);
 		_delay(PULSE * 1);
-		digitalWrite(TX, LOW);
+		digitalWrite(TX, 0);
 		_delay(PULSE * 15);
-		code = codeRepeat;
-		for (i = 0; i < 28; i++) {
-			if ((code & msb) == 0) {
-				// send 0
-				digitalWrite(TX, HIGH);
-				_delay(PULSE * 1);
-				digitalWrite(TX, LOW);
-				_delay(PULSE * 3);
-			} else {
+		// send code sequence
+		for (int i = CODE_LENGTH - 1; i >= 0; i--) {
+			if (code & (1L << i)) {
 				// send 1
-				digitalWrite(TX, HIGH);
+				digitalWrite(TX, 1);
 				_delay(PULSE * 3);
-				digitalWrite(TX, LOW);
+				digitalWrite(TX, 0);
 				_delay(PULSE * 1);
+			} else {
+				// send 0
+				digitalWrite(TX, 1);
+				_delay(PULSE * 1);
+				digitalWrite(TX, 0);
+				_delay(PULSE * 3);
 			}
-			code = code << 1;
 		}
 	}
+	// send sync
+	digitalWrite(TX, 1);
+	_delay(PULSE * 1);
+	digitalWrite(TX, 0);
+	_delay(PULSE * 15);
 }
 
 static void send(char remote, char channel, char command, char offset) {
