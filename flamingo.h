@@ -1,8 +1,8 @@
 #define RX 					2
 #define TX  				0
 
-// tested with 1 C 1: min 180 max 350
-#define PULSE 				200
+// tested with 1 C 1: min 180 max 350 --> 330 is closest to the original remote
+#define PULSE 				330
 
 // command length is 28 bits
 #define CODE_LENGTH			28

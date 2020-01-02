@@ -14,8 +14,6 @@
 
 #include "flamingo.h"
 
-unsigned int pulse;
-
 static void _delay(unsigned int millis) {
 	struct timeval tNow, tLong, tEnd;
 
@@ -31,23 +29,23 @@ static void _delay(unsigned int millis) {
 
 static void txzero() {
 	digitalWrite(TX, 1);
-	_delay(pulse * 1);
+	_delay(PULSE * 1);
 	digitalWrite(TX, 0);
-	_delay(pulse * 3);
+	_delay(PULSE * 3);
 }
 
 static void txone() {
 	digitalWrite(TX, 1);
-	_delay(pulse * 3);
+	_delay(PULSE * 3);
 	digitalWrite(TX, 0);
-	_delay(pulse * 1);
+	_delay(PULSE * 1);
 }
 
 static void txsync() {
 	digitalWrite(TX, 1);
-	_delay(pulse * 1);
+	_delay(PULSE * 1);
 	digitalWrite(TX, 0);
-	_delay(pulse * 15);
+	_delay(PULSE * 15);
 }
 
 static void send(char remote, char channel, char command, char offset) {
@@ -56,7 +54,7 @@ static void send(char remote, char channel, char command, char offset) {
 	unsigned long code = FLAMINGO[x][y];
 
 //	printf("remote %i channel %i command %i offset %i\n", remote, channel, command, offset);
-//	printf("sending FLAMINGO[%i][%i] code 0x%08lx %i\n", x, y, code, pulse);
+//	printf("sending FLAMINGO[%i][%i] code 0x%08lx %i\n", x, y, code, PULSE);
 
 // original remote sends 4x the same code with no delay (except sync) between
 	for (int repeat = 1; repeat <= 4; repeat++) {
@@ -142,19 +140,5 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	pulse = PULSE;
 	send(remote, channel, command, offset);
-	usleep(500);
-
-	pulse = PULSE + 50;
-	send(remote, channel, command, offset);
-	usleep(500);
-
-	pulse = PULSE + 100;
-	send(remote, channel, command, offset);
-	usleep(500);
-
-//	pulse = PULSE + 150;
-//	send(remote, channel, command, offset);
-//	usleep(500);
 }

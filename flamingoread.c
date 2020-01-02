@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <sys/mman.h>
 #include <sys/time.h>
 #include <wiringPi.h>
@@ -47,7 +48,7 @@ static void sync_1() {
 	code = 0;
 	bitcount = 0;
 	if (newstate == 1) {
-//		printf("detected lo sync 1\n");
+		printf("detected lo sync 1 %lu\n", pulse);
 		edge = 0;
 	}
 }
@@ -56,7 +57,7 @@ static void sync_2() {
 	code = 0;
 	bitcount = 0;
 	if (newstate == 1) {
-//		printf("detected lo sync 2\n");
+		printf("detected lo sync 2 %lu\n", pulse);
 		edge = 1;
 	}
 }
@@ -65,7 +66,7 @@ static void sync_3() {
 	code = 0;
 	bitcount = 0;
 	if (newstate == 1) {
-//		printf("detected lo sync 3\n");
+		printf("detected lo sync 3 %lu\n", pulse);
 		edge = 1;
 	}
 }
@@ -77,13 +78,44 @@ static void next() {
 	state = newstate;
 }
 
+static void calculate() {
+	pulse = ((tNow.tv_sec * 1000000) + tNow.tv_usec) - ((tLast.tv_sec * 1000000) + tLast.tv_usec);
+
+	// check for sync pulses
+	if (pulse < 100) {
+		return; // noise
+	} else if (4500 < pulse && pulse < 5000) {
+		sync_1();
+		next();
+		return;
+//	} else if (2500 < pulse && pulse < 3000) {
+//		sync_2();
+//		next();
+//		return;
+//	} else if (10000 < pulse && pulse < 11000) {
+//		sync_3();
+//		next();
+//		return;
+	}
+
+	// depending on encoded sequence - sample rising or falling edge
+	if (newstate == edge) {
+		sample_hot();
+	} else {
+		sample_cold();
+	}
+
+	next();
+}
+
+static void isr() {
+	// immediately calculate pulse length
+	gettimeofday(&tNow, NULL);
+	newstate = digitalRead(RX);
+	calculate();
+}
+
 static void poll() {
-
-	// initialize
-	pulse = lastPulse = 9999;
-	state = digitalRead(RX);
-	bitcount = 0;
-
 	while (1) {
 		// wait for next rising or falling edge
 		do {
@@ -92,31 +124,7 @@ static void poll() {
 
 		// immediately calculate pulse length
 		gettimeofday(&tNow, NULL);
-		pulse = ((tNow.tv_sec * 1000000) + tNow.tv_usec) - ((tLast.tv_sec * 1000000) + tLast.tv_usec);
-
-		// check for sync pulses
-		if (4500 < pulse && pulse < 5000) {
-			sync_1();
-			next();
-			continue;
-		} else if (2500 < pulse && pulse < 3000) {
-//			sync_2();
-			next();
-			continue;
-		} else if (10000 < pulse && pulse < 11000) {
-//			sync_3();
-			next();
-			continue;
-		}
-
-		// depending on encoded sequence - sample rising or falling edge
-		if (newstate == edge) {
-			sample_hot();
-		} else {
-			sample_cold();
-		}
-
-		next();
+		calculate();
 	}
 }
 
@@ -145,8 +153,20 @@ int main(int argc, char **argv) {
 	code = (1L << 28);
 	printf("test: bit 28 (must be printed as 0x10000000) --> 0x%08lx\n", code);
 
+	// initialize
+	pulse = lastPulse = 9999;
 	state = digitalRead(RX);
+	bitcount = 0;
 	printf("pin state: %i\n", state);
 
-	poll();
+// by continuous polling
+	// poll();
+
+// via interrupt
+	if (wiringPiISR(RX, INT_EDGE_BOTH, &isr) < 0) {
+		return -4;
+	}
+	while (1) {
+		sleep(1);
+	}
 }
