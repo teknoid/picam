@@ -55,10 +55,10 @@ static void send(char remote, char channel, char command, char offset) {
 	unsigned int y = command * 4 + offset;
 	unsigned long code = FLAMINGO[x][y];
 
-	printf("remote %i channel %i command %i offset %i\n", remote, channel, command, offset);
-	printf("sending FLAMINGO[%i][%i] code 0x%08lx %i\n", x, y, code, pulse);
+//	printf("remote %i channel %i command %i offset %i\n", remote, channel, command, offset);
+//	printf("sending FLAMINGO[%i][%i] code 0x%08lx %i\n", x, y, code, pulse);
 
-	// original remote sends 4x the same code with no delay (except sync) between
+// original remote sends 4x the same code with no delay (except sync) between
 	for (int repeat = 1; repeat <= 4; repeat++) {
 		txsync();
 		for (int i = CODE_LENGTH - 1; i >= 0; i--) {
@@ -154,7 +154,7 @@ int main(int argc, char *argv[]) {
 	send(remote, channel, command, offset);
 	usleep(500);
 
-	pulse = PULSE + 150;
-	send(remote, channel, command, offset);
-	usleep(500);
+//	pulse = PULSE + 150;
+//	send(remote, channel, command, offset);
+//	usleep(500);
 }
