@@ -6,12 +6,15 @@
 #include <errno.h>
 #include <syslog.h>
 #include <time.h>
+#include <unistd.h>
 #include <pthread.h>
 #include <sys/mman.h>
 #include <sys/time.h>
 #include <wiringPi.h>
 
 #include "flamingo.h"
+
+unsigned int pulse;
 
 static void _delay(unsigned int millis) {
 	struct timeval tNow, tLong, tEnd;
@@ -26,41 +29,46 @@ static void _delay(unsigned int millis) {
 	}
 }
 
-static void _send(uint32_t code) {
-	// at least 1 repeat is necessary
-	for (int repeat = 0; repeat < 5; repeat++) {
-		// send sync
-		digitalWrite(TX, 1);
-		_delay(PULSE * 1);
-		digitalWrite(TX, 0);
-		_delay(PULSE * 15);
-		// send code sequence
-		for (int i = CODE_LENGTH - 1; i >= 0; i--) {
-			if (code & (1L << i)) {
-				// send 1
-				digitalWrite(TX, 1);
-				_delay(PULSE * 3);
-				digitalWrite(TX, 0);
-				_delay(PULSE * 1);
-			} else {
-				// send 0
-				digitalWrite(TX, 1);
-				_delay(PULSE * 1);
-				digitalWrite(TX, 0);
-				_delay(PULSE * 3);
-			}
-		}
-	}
+static void txzero() {
+	digitalWrite(TX, 1);
+	_delay(pulse * 1);
+	digitalWrite(TX, 0);
+	_delay(pulse * 3);
+}
+
+static void txone() {
+	digitalWrite(TX, 1);
+	_delay(pulse * 3);
+	digitalWrite(TX, 0);
+	_delay(pulse * 1);
+}
+
+static void txsync() {
+	digitalWrite(TX, 1);
+	_delay(pulse * 1);
+	digitalWrite(TX, 0);
+	_delay(pulse * 15);
 }
 
 static void send(char remote, char channel, char command, char offset) {
-	uint16_t x = (remote - 1) * 4 + (channel - 'A');
-	uint16_t y = command * 4 + offset;
-	uint32_t code = FLAMINGO[x][y];
+	unsigned int x = (remote - 1) * 4 + (channel - 'A');
+	unsigned int y = command * 4 + offset;
+	unsigned long code = FLAMINGO[x][y];
 
-	// printf("%i %i %i %i\n", remote, channel, command, offset);
-	// printf("sending FLAMINGO[%i][%i] code 0x%08x\n", x, y, code);
-	_send(code);
+	printf("remote %i channel %i command %i offset %i\n", remote, channel, command, offset);
+	printf("sending FLAMINGO[%i][%i] code 0x%08lx %i\n", x, y, code, pulse);
+
+	// original remote sends 4x the same code with no delay (except sync) between
+	for (int repeat = 1; repeat <= 4; repeat++) {
+		txsync();
+		for (int i = CODE_LENGTH - 1; i >= 0; i--) {
+			if (code & (1L << i)) {
+				txone();
+			} else {
+				txzero();
+			}
+		}
+	}
 }
 
 static void usage() {
@@ -83,16 +91,16 @@ int main(int argc, char *argv[]) {
 		return -2;
 	}
 
-	// Lock memory to ensure no swapping is done.
-	if (mlockall(MCL_FUTURE | MCL_CURRENT)) {
+	// Set our thread to MAX priority
+	struct sched_param sp;
+	memset(&sp, 0, sizeof(sp));
+	sp.sched_priority = sched_get_priority_max(SCHED_FIFO);
+	if (sched_setscheduler(0, SCHED_FIFO, &sp)) {
 		return -3;
 	}
 
-	// Set our thread to real time priority
-	struct sched_param sp;
-	sp.sched_priority = SCHED_PRIO;
-	if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp)) {
-		printf("Unable to set thread priority: %s\n", strerror(errno));
+	// Lock memory to ensure no swapping is done.
+	if (mlockall(MCL_FUTURE | MCL_CURRENT)) {
 		return -4;
 	}
 
@@ -134,5 +142,19 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
+	pulse = PULSE;
 	send(remote, channel, command, offset);
+	usleep(500);
+
+	pulse = PULSE + 50;
+	send(remote, channel, command, offset);
+	usleep(500);
+
+	pulse = PULSE + 100;
+	send(remote, channel, command, offset);
+	usleep(500);
+
+	pulse = PULSE + 150;
+	send(remote, channel, command, offset);
+	usleep(500);
 }

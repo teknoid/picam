@@ -1,94 +1,124 @@
+#include <sched.h>
 #include <stdio.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-#include <pthread.h>
-#include <unistd.h>
 #include <sys/mman.h>
+#include <sys/time.h>
 #include <wiringPi.h>
 
 #include "flamingo.h"
 
-int bitcount = 0;
-unsigned long timer = 0;
-unsigned long lastTimer = 0;
-unsigned long hiPulse = 0;
-unsigned long loPulse = 0;
-unsigned long pulse = 0;
-long bit;
-char state, record;
+static struct timeval tNow, tLast;
 
-uint64_t code;
+static int bitcount;
+static char bit, state, newstate, edge;
+static unsigned long code, pulse, lastPulse;
 
-static void _trigger_flamingo() {
-	timer = micros();
-	pulse = timer - lastTimer;
-	lastTimer = timer;
-
-	state = digitalRead(RX);
-	if (state == 1) {
-		loPulse = pulse;
-	} else {
-		hiPulse = pulse;
-	}
-
-	if (record && state == 1) {
-		bit = hiPulse - loPulse;
-		if (bit > 0) {
-			code++;
+static char *printBits() {
+	char *out = malloc(sizeof(long) * 8) + 1;
+	char *p = out;
+	for (unsigned long mask = (1 << (sizeof(long) * 8 - 1)); mask > 0; mask >>= 1) {
+		if (code & mask) {
+			*p++ = '1';
+		} else {
+			*p++ = '0';
 		}
-		if (++bitcount == 28) {
-			printf(" *** %02i bits received: 0x%08llx\n", bitcount, code);
-			record = 0;
-		}
-		code = code << 1;
 	}
+	*p++ = '\0';
+	return out;
+}
 
-	if (loPulse > 3000 && loPulse < 6000) { // first start condition on rising edge
-		bitcount = 0;
-		loPulse = 0;
-		hiPulse = 0;
-		code = 0;
-		record = 1;
+static void sample_hot() {
+	bit = pulse > 660 ? 1 : 0;
+	code = code << 1;
+	code += bit;
+	bitcount++;
+//	printf("H %04lu/%04lu %04ld %02d %s 0x%08lx\n", lastPulse, pulse, lastPulse + pulse, bitcount, printBits(code), code);
+	if (bitcount == 28) {
+		printf("got code 0x%08lx\n", code);
 	}
 }
 
-//static void _trigger_generic() {
-//	timer = micros();
-//	pulse = timer - lastTimer;
-//	lastTimer = timer;
-//
-//	state = digitalRead(RX);
-//	if (state == 1) {
-//		loPulse = pulse;
-//	} else {
-//		hiPulse = pulse;
-//	}
-//
-//	if (loPulse > 3000 && loPulse < 15000) { // any start condition on rising edge
-//		printf(" *** sync detected, lo=%05lu, hi=%05lu, %02i bits received: 0x%08llx\n", loPulse, hiPulse, bitcount, code);
-//		bitcount = 0;
-//		loPulse = 0;
-//		hiPulse = 0;
-//		code = 0;
-//		return;
-//	}
-//
-//	if (state == 1) {
-//		code = code << 1;
-//		bit = hiPulse - loPulse;
-//		if (bit > 0) {
-//			printf("1");
-//			code++;
-//		} else {
-//			printf("0");
-//		}
-//		if (++bitcount % 8 == 0) {
-//			printf(" ");
-//		}
-//	}
-//}
+static void sample_cold() {
+//	printf("C %04lu/%04lu %04ld %02d %s 0x%08lx\n", lastPulse, pulse, lastPulse + pulse, bitcount, printBits(code), code);
+}
+
+static void sync_1() {
+	code = 0;
+	bitcount = 0;
+	if (newstate == 1) {
+//		printf("detected lo sync 1\n");
+		edge = 0;
+	}
+}
+
+static void sync_2() {
+	code = 0;
+	bitcount = 0;
+	if (newstate == 1) {
+//		printf("detected lo sync 2\n");
+		edge = 1;
+	}
+}
+
+static void sync_3() {
+	code = 0;
+	bitcount = 0;
+	if (newstate == 1) {
+//		printf("detected lo sync 3\n");
+		edge = 1;
+	}
+}
+
+static void next() {
+	tLast.tv_sec = tNow.tv_sec;
+	tLast.tv_usec = tNow.tv_usec;
+	lastPulse = pulse;
+	state = newstate;
+}
+
+static void poll() {
+
+	// initialize
+	pulse = lastPulse = 9999;
+	state = digitalRead(RX);
+	bitcount = 0;
+
+	while (1) {
+		// wait for next rising or falling edge
+		do {
+			newstate = digitalRead(RX);
+		} while (state == newstate);
+
+		// immediately calculate pulse length
+		gettimeofday(&tNow, NULL);
+		pulse = ((tNow.tv_sec * 1000000) + tNow.tv_usec) - ((tLast.tv_sec * 1000000) + tLast.tv_usec);
+
+		// check for sync pulses
+		if (4500 < pulse && pulse < 5000) {
+			sync_1();
+			next();
+			continue;
+		} else if (2500 < pulse && pulse < 3000) {
+//			sync_2();
+			next();
+			continue;
+		} else if (10000 < pulse && pulse < 11000) {
+//			sync_3();
+			next();
+			continue;
+		}
+
+		// depending on encoded sequence - sample rising or falling edge
+		if (newstate == edge) {
+			sample_hot();
+		} else {
+			sample_cold();
+		}
+
+		next();
+	}
+}
 
 int main(int argc, char **argv) {
 	if (wiringPiSetup() == -1) {
@@ -96,27 +126,27 @@ int main(int argc, char **argv) {
 		return -1;
 	}
 
-// Lock memory to ensure no swapping is done.
-	if (mlockall(MCL_FUTURE | MCL_CURRENT)) {
+	// Set our thread to MAX priority
+	struct sched_param sp;
+	memset(&sp, 0, sizeof(sp));
+	sp.sched_priority = sched_get_priority_max(SCHED_FIFO);
+	if (sched_setscheduler(0, SCHED_FIFO, &sp)) {
 		return -2;
 	}
 
-// Set our thread to real time priority
-	struct sched_param sp;
-	sp.sched_priority = SCHED_PRIO;
-	if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp)) {
-		printf("Unable to set thread priority: %s\n", strerror(errno));
+	// Lock memory to ensure no swapping is done.
+	if (mlockall(MCL_FUTURE | MCL_CURRENT)) {
 		return -3;
 	}
 
 	pinMode(RX, INPUT);
-	pullUpDnControl(RX, PUD_UP);
-	if (wiringPiISR(RX, INT_EDGE_BOTH, &_trigger_flamingo) < 0) {
-		printf("Unable to setup ISR: %s\n", strerror(errno));
-		return -4;
-	}
+	pullUpDnControl(RX, PUD_DOWN);
 
-	while (1) {
-		sleep(1);
-	}
+	code = (1L << 28);
+	printf("test: bit 28 (must be printed as 0x10000000) --> 0x%08lx\n", code);
+
+	state = digitalRead(RX);
+	printf("pin state: %i\n", state);
+
+	poll();
 }

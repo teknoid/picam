@@ -2,16 +2,13 @@
 #define TX  				0
 
 // tested with 1 C 1: min 180 max 350
-#define PULSE 				250
-
-// we use 49 as the PRREMPT_RT use 50 as the priority of kernel tasklets and interrupt handler by default
-#define SCHED_PRIO 			49
+#define PULSE 				200
 
 // command length is 28 bits
 #define CODE_LENGTH			28
 
 #define REMOTES				4
-uint32_t FLAMINGO[REMOTES * 4][8] = {
+unsigned long FLAMINGO[REMOTES * 4][8] = {
 
 //		Remote Name
 //		{ , , , , , , ,  }, // 4 codes for OFF + 4 codes for ON
@@ -19,7 +16,7 @@ uint32_t FLAMINGO[REMOTES * 4][8] = {
 
 //		White 1
 //		  OFF											  ON
-		{ 0x0253174e, 0x02498346, 0x0252e83a, 0x0251b29a, 0x02779c76, 0x0274b462, 0x02796056, 0x025469de },
+		{ 0x0251b29a, 0x0253174e, 0x02498346, 0x0252e83a, 0x02796056, 0x025469de, 0x02779c76, 0x0274b462 },
 		{ 0x02783f5d, 0x024f5b55, 0x0256408d, 0x025a5c29, 0x0261b985, 0x0246c8d1, 0x025ab199, 0x025f0bf9 },
 		{ 0x0e6bd68d, 0x0e7be29d, 0x0e70a7f5, 0x0e763e15, 0x0e738cb9, 0x0e7432d1, 0x0e7ff619, 0x0e4e8e31 },
 		{ 0x06492136, 0x065c85ba, 0x064bdeb2, 0x0667d10a, 0x06467c9a, 0x066e7082, 0x064e6086, 0x0653b3aa },
