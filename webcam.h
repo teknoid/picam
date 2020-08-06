@@ -4,10 +4,10 @@
 #define WEBCAM_STOP_TIMELAPSE	"su -c \"/home/www/webcam/webcam-stop.sh timelapse &\" hje"
 
 // webcam off: ↑earlier, ↓later
-#define WEBCAM_SUNDOWN			3650
+#define WEBCAM_SUNDOWN			3600
 
 // webcam on: ↑later ↓earlier
-#define WEBCAM_SUNRISE			3650
+#define WEBCAM_SUNRISE			3500
 
 int webcam_init(void);
 void webcam_close(void);
