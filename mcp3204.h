@@ -1,3 +1,5 @@
+#include <stdint.h>
+
 #define VCC_REF			5120	// reference voltage used for A/D conversion
 #define SAMPLES			100		// take SAMPLES from MCP3204 and calculate average
 
