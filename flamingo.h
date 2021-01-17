@@ -3,7 +3,7 @@
 
 // timings for 28bit and 24bit code sequences
 // tested with 1 C 1: min 180 max 350 --> 330 is closest to the original remote
-#define P2824				333
+#define P2824				330
 const static unsigned long P2824X2 = P2824 * 2;
 const static unsigned long P2824X3 = P2824 * 3;
 const static unsigned long P2824X15 = P2824 * 15;

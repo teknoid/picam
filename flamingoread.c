@@ -28,6 +28,12 @@ static char *printBits() {
 	return out;
 }
 
+// short high pulse followed by long low pulse or long high + short low pulse, no clock
+//       _              ___
+// 0 = _| |___    1 = _|   |_
+//
+// https://forum.arduino.cc/index.php?topic=201771.0
+//
 static void isr2824() {
 	// calculate pulse length; store timer value for next calculation; get pin state
 	gettimeofday(&tNow, NULL);
@@ -47,7 +53,7 @@ static void isr2824() {
 		return;
 	}
 
-	// check valid pulse lengths
+	// ignore noise
 	if (pulse < 100) {
 		return;
 	}
@@ -66,6 +72,12 @@ static void isr2824() {
 	}
 }
 
+// clock pulse + data pulse, either short or long distance from clock to data pulse
+//       _   _               _      _
+// 0 = _| |_| |____    1 = _| |____| |_
+//
+// https://forum.pilight.org/showthread.php?tid=1110&page=12
+//
 static void isr32_short() {
 	// calculate pulse length; store timer value for next calculation; get pin state
 	gettimeofday(&tNow, NULL);
@@ -83,7 +95,7 @@ static void isr32_short() {
 			return;
 		}
 
-		// data pulse, check space between prior clock pulse: short=0 long=1
+		// data pulse, check space between previous clock pulse: short=0 long=1
 		code += pulse > P32X2 ? 1 : 0;
 		if (--bits == 0) {
 			printf("0x%08lx\n", code);
@@ -93,7 +105,7 @@ static void isr32_short() {
 		return;
 	}
 
-	// check valid pulse lengths
+	// ignore noise
 	if (pulse < 100) {
 		return;
 	}
@@ -109,6 +121,8 @@ static void isr32_short() {
 	}
 }
 
+// similar to isr32_short but with longer sync
+// looks like a clock pulse but more than one data pulse follow - encoding not yet known
 static void isr32_long() {
 	// calculate pulse length; store timer value for next calculation; get pin state
 	gettimeofday(&tNow, NULL);
@@ -133,7 +147,7 @@ static void isr32_long() {
 		return;
 	}
 
-	// check valid pulse lengths
+	// ignore noise
 	if (pulse < 100) {
 		return;
 	}
@@ -170,18 +184,39 @@ int main(int argc, char **argv) {
 	pinMode(RX, INPUT);
 	pullUpDnControl(RX, PUD_DOWN);
 
-	code = (1L << 28);
-	printf("test: bit 28 (must be printed as 0x10000000) --> 0x%08lx\n", code);
-
 	// initialize
 	state = digitalRead(RX);
 	printf("pin state: %i\n", state);
 
 	bits = 0;
-//	if (wiringPiISR(RX, INT_EDGE_BOTH, &isr2824) < 0) {
-//	if (wiringPiISR(RX, INT_EDGE_BOTH, &isr32_short) < 0) {
-	if (wiringPiISR(RX, INT_EDGE_BOTH, &isr32_long) < 0) {
-		return -4;
+
+	// parse command line arguments
+	int c = getopt(argc, argv, "123");
+	switch (c) {
+	case '1':
+		printf("listening on 28bit & 24bit codes...\n");
+		if (wiringPiISR(RX, INT_EDGE_BOTH, &isr2824) < 0) {
+			return -4;
+		}
+		break;
+	case '2':
+		printf("listening on 32bit codes short sync...\n");
+		if (wiringPiISR(RX, INT_EDGE_BOTH, &isr32_short) < 0) {
+			return -4;
+		}
+		break;
+	case '3':
+		printf("listening on 32bit codes long sync...\n");
+		if (wiringPiISR(RX, INT_EDGE_BOTH, &isr32_long) < 0) {
+			return -4;
+		}
+		break;
+	default:
+		printf("Usage: flamingoread -1 | -2 | -3\n");
+		printf("  -1 ... detect 28bit & 24bit codes, rc pattern 1 and 4\n");
+		printf("  -2 ... detect 32bit codes with short sync, rc pattern 2\n");
+		printf("  -3 ... detect 32bit codes with long sync, rc pattern 3, encoding still unknown\n");
+		return -5;
 	}
 
 	while (1) {
