@@ -1,15 +1,27 @@
 #define RX 					2
 #define TX  				0
 
+// timings for 28bit and 24bit code sequences
 // tested with 1 C 1: min 180 max 350 --> 330 is closest to the original remote
-#define PULSE 				330
+#define P2824				333
+const static unsigned long P2824X2 = P2824 * 2;
+const static unsigned long P2824X3 = P2824 * 3;
+const static unsigned long P2824X15 = P2824 * 15;
+const static unsigned long P2824X31 = P2824 * 31;
+const static unsigned long SYNCF28MIN = P2824X15 - 80;
+const static unsigned long SYNCF28MAX = P2824X15 + 80;
+const static unsigned long SYNCF24MIN = P2824X31 - 100;
+const static unsigned long SYNCF24MAX = P2824X31 + 100;
 
-// command length is 28 bits
-#define CODE_LENGTH			28
+// timings for 32bit code sequences
+#define P32					200
+const static unsigned long P32X2 = P32 * 2;
+const static unsigned long P32X14 = P32 * 14;
+const static unsigned long SYNCF32MIN = P32X14 - 50;
+const static unsigned long SYNCF32MAX = P32X14 + 50;
 
 #define REMOTES				4
-unsigned long FLAMINGO[REMOTES * 4][8] = {
-
+const static unsigned long FLAMINGO[REMOTES * 4][8] = {
 //		Remote Name
 //		{ , , , , , , ,  }, // 4 codes for OFF + 4 codes for ON
 

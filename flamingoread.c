@@ -11,9 +11,8 @@
 
 static struct timeval tNow, tLast;
 
-static int bitcount;
-static char bit, state, newstate, edge;
-static unsigned long code, pulse, lastPulse;
+static unsigned char bits, state, clock, databits;
+static unsigned long code, pulse;
 
 static char *printBits() {
 	char *out = malloc(sizeof(long) * 8) + 1;
@@ -29,102 +28,123 @@ static char *printBits() {
 	return out;
 }
 
-static void sample_hot() {
-	bit = pulse > 660 ? 1 : 0;
-	code = code << 1;
-	code += bit;
-	bitcount++;
-//	printf("H %04lu/%04lu %04ld %02d %s 0x%08lx\n", lastPulse, pulse, lastPulse + pulse, bitcount, printBits(code), code);
-	if (bitcount == 28) {
-		printf("got code 0x%08lx\n", code);
-	}
-}
-
-static void sample_cold() {
-//	printf("C %04lu/%04lu %04ld %02d %s 0x%08lx\n", lastPulse, pulse, lastPulse + pulse, bitcount, printBits(code), code);
-}
-
-static void sync_1() {
-	code = 0;
-	bitcount = 0;
-	if (newstate == 1) {
-		printf("detected lo sync 1 %lu\n", pulse);
-		edge = 0;
-	}
-}
-
-static void sync_2() {
-	code = 0;
-	bitcount = 0;
-	if (newstate == 1) {
-		printf("detected lo sync 2 %lu\n", pulse);
-		edge = 1;
-	}
-}
-
-static void sync_3() {
-	code = 0;
-	bitcount = 0;
-	if (newstate == 1) {
-		printf("detected lo sync 3 %lu\n", pulse);
-		edge = 1;
-	}
-}
-
-static void next() {
+static void isr2824() {
+	// calculate pulse length; store timer value for next calculation; get pin state
+	gettimeofday(&tNow, NULL);
+	state = digitalRead(RX);
+	pulse = ((tNow.tv_sec * 1000000) + tNow.tv_usec) - ((tLast.tv_sec * 1000000) + tLast.tv_usec);
 	tLast.tv_sec = tNow.tv_sec;
 	tLast.tv_usec = tNow.tv_usec;
-	lastPulse = pulse;
-	state = newstate;
-}
 
-static void calculate() {
-	pulse = ((tNow.tv_sec * 1000000) + tNow.tv_usec) - ((tLast.tv_sec * 1000000) + tLast.tv_usec);
-
-	// check for sync pulses
-	if (pulse < 100) {
-		return; // noise
-	} else if (4500 < pulse && pulse < 5000) {
-		sync_1();
-		next();
+	// measure HIGH pulse length: short=0 long=1
+	if (bits && (state == 0)) {
+		code = code << 1;
+		code += pulse > P2824X2 ? 1 : 0;
+		if (--bits == 0) {
+			printf("0x%08lx\n", code);
+			code = 0;
+		}
 		return;
-//	} else if (2500 < pulse && pulse < 3000) {
-//		sync_2();
-//		next();
-//		return;
-//	} else if (10000 < pulse && pulse < 11000) {
-//		sync_3();
-//		next();
-//		return;
 	}
 
-	// depending on encoded sequence - sample rising or falling edge
-	if (newstate == edge) {
-		sample_hot();
-	} else {
-		sample_cold();
+	// check valid pulse lengths
+	if (pulse < 100) {
+		return;
 	}
 
-	next();
+	// check for sync LOW pulses
+	if (state == 1) {
+		// a rising edge
+		if (SYNCF28MIN < pulse && pulse < SYNCF28MAX) {
+			bits = 28;
+			printf("28bit LOW sync %lu :: ", pulse);
+		} else if (SYNCF24MIN < pulse && pulse < SYNCF24MAX) {
+			bits = 24;
+			printf("24bit LOW sync %lu :: ", pulse);
+		}
+		// printf("LOW sync %lu\n", pulse);
+	}
 }
 
-static void isr() {
-	// immediately calculate pulse length
+static void isr32_short() {
+	// calculate pulse length; store timer value for next calculation; get pin state
 	gettimeofday(&tNow, NULL);
-	newstate = digitalRead(RX);
-	calculate();
+	state = digitalRead(RX);
+	pulse = ((tNow.tv_sec * 1000000) + tNow.tv_usec) - ((tLast.tv_sec * 1000000) + tLast.tv_usec);
+	tLast.tv_sec = tNow.tv_sec;
+	tLast.tv_usec = tNow.tv_usec;
+
+	// measure LOW pulses, skip clock and the check space between next pulse
+	if (bits && (state == 1)) {
+		// clock pulse -> skip
+		if (clock) {
+			clock = 0;
+			code = code << 1;
+			return;
+		}
+
+		// data pulse, check space between prior clock pulse: short=0 long=1
+		code += pulse > P32X2 ? 1 : 0;
+		if (--bits == 0) {
+			printf("0x%08lx\n", code);
+			code = 0;
+		}
+		clock = 1; // next is a clock pulse
+		return;
+	}
+
+	// check valid pulse lengths
+	if (pulse < 100) {
+		return;
+	}
+
+	// check for sync LOW pulses
+	if (state == 1) {
+		// a rising edge
+		if (SYNCF32MIN < pulse && pulse < SYNCF32MAX) {
+			clock = 0; // this is the first clock pulse
+			bits = 32;
+			printf("32bit LOW short sync %lu :: ", pulse);
+		}
+	}
 }
 
-static void poll() {
-	while (1) {
-		// wait for next rising or falling edge
-		do {
-			newstate = digitalRead(RX);
-		} while (state == newstate);
+static void isr32_long() {
+	// calculate pulse length; store timer value for next calculation; get pin state
+	gettimeofday(&tNow, NULL);
+	state = digitalRead(RX);
+	pulse = ((tNow.tv_sec * 1000000) + tNow.tv_usec) - ((tLast.tv_sec * 1000000) + tLast.tv_usec);
+	tLast.tv_sec = tNow.tv_sec;
+	tLast.tv_usec = tNow.tv_usec;
 
-		// immediately calculate pulse length
-		gettimeofday(&tNow, NULL);
-		calculate();
+	// measure LOW pulses and decide if it was a data bit or a clock bit
+	if (bits && (state == 1)) {
+		if (pulse < P32X2) {
+			// simply count the data bits
+			databits++;
+		} else {
+			// next clock bit, store data bits
+			printf("%d", databits);
+			if (--bits == 0) {
+				printf("\n");
+			}
+			databits = 0;
+		}
+		return;
+	}
+
+	// check valid pulse lengths
+	if (pulse < 100) {
+		return;
+	}
+
+	// check for sync LOW pulses
+	if (state == 1) {
+		// a rising edge
+		if (9200 < pulse && pulse < 9300) {
+			bits = 32;
+			printf("32bit LOW long sync %lu :: ", pulse);
+		}
 	}
 }
 
@@ -154,18 +174,16 @@ int main(int argc, char **argv) {
 	printf("test: bit 28 (must be printed as 0x10000000) --> 0x%08lx\n", code);
 
 	// initialize
-	pulse = lastPulse = 9999;
 	state = digitalRead(RX);
-	bitcount = 0;
 	printf("pin state: %i\n", state);
 
-// by continuous polling
-	// poll();
-
-// via interrupt
-	if (wiringPiISR(RX, INT_EDGE_BOTH, &isr) < 0) {
+	bits = 0;
+//	if (wiringPiISR(RX, INT_EDGE_BOTH, &isr2824) < 0) {
+//	if (wiringPiISR(RX, INT_EDGE_BOTH, &isr32_short) < 0) {
+	if (wiringPiISR(RX, INT_EDGE_BOTH, &isr32_long) < 0) {
 		return -4;
 	}
+
 	while (1) {
 		sleep(1);
 	}

@@ -27,28 +27,7 @@ static void _delay(unsigned int millis) {
 	}
 }
 
-static void txzero() {
-	digitalWrite(TX, 1);
-	_delay(PULSE * 1);
-	digitalWrite(TX, 0);
-	_delay(PULSE * 3);
-}
-
-static void txone() {
-	digitalWrite(TX, 1);
-	_delay(PULSE * 3);
-	digitalWrite(TX, 0);
-	_delay(PULSE * 1);
-}
-
-static void txsync() {
-	digitalWrite(TX, 1);
-	_delay(PULSE * 1);
-	digitalWrite(TX, 0);
-	_delay(PULSE * 15);
-}
-
-static void send(char remote, char channel, char command, char offset) {
+static void send28(char remote, char channel, char command, char offset) {
 	unsigned int x = (remote - 1) * 4 + (channel - 'A');
 	unsigned int y = command * 4 + offset;
 	unsigned long code = FLAMINGO[x][y];
@@ -56,15 +35,65 @@ static void send(char remote, char channel, char command, char offset) {
 //	printf("remote %i channel %i command %i offset %i\n", remote, channel, command, offset);
 //	printf("sending FLAMINGO[%i][%i] code 0x%08lx %i\n", x, y, code, PULSE);
 
-// original remote sends 4x the same code with no delay (except sync) between
 	for (int repeat = 1; repeat <= 4; repeat++) {
-		txsync();
-		for (int i = CODE_LENGTH - 1; i >= 0; i--) {
-			if (code & (1L << i)) {
-				txone();
+		unsigned long mask = 1 << 27;
+
+		// sync
+		digitalWrite(TX, 1);
+		_delay(P2824);
+		digitalWrite(TX, 0);
+		_delay(P2824X15);
+
+		while (mask) {
+			if (code & mask) {
+				// 1
+				digitalWrite(TX, 1);
+				_delay(P2824X3);
+				digitalWrite(TX, 0);
+				_delay(P2824);
 			} else {
-				txzero();
+				// 0
+				digitalWrite(TX, 1);
+				_delay(P2824);
+				digitalWrite(TX, 0);
+				_delay(P2824X3);
 			}
+
+			mask = mask >> 1;
+		}
+	}
+}
+
+static void send24(char remote, char channel, char command, char offset) {
+	unsigned int x = (remote - 1) * 4 + (channel - 'A');
+	unsigned int y = command * 4 + offset;
+	unsigned long code = 0x00144114;
+
+	for (int repeat = 1; repeat <= 5; repeat++) {
+		unsigned long mask = 1 << 23;
+
+		// sync
+		digitalWrite(TX, 1);
+		_delay(P2824);
+		digitalWrite(TX, 0);
+		_delay(P2824X31);
+
+		while (mask) {
+			if (code & mask) {
+				// 1
+				digitalWrite(TX, 1);
+				_delay(P2824X3);
+				digitalWrite(TX, 0);
+				_delay(P2824);
+			} else {
+				// 0
+				digitalWrite(TX, 1);
+				_delay(P2824);
+				digitalWrite(TX, 0);
+				_delay(P2824X3);
+			}
+
+			mask = mask >> 1;
 		}
 	}
 }
@@ -140,5 +169,5 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	send(remote, channel, command, offset);
+	send24(remote, channel, command, offset);
 }
