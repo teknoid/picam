@@ -14,7 +14,7 @@
 
 static struct timeval tNow, tLast;
 
-static unsigned int txid;
+static unsigned int xmitter;
 
 static unsigned long code, message, pulse;
 
@@ -130,8 +130,8 @@ static void isr32_short() {
 		if (--bits == 0) {
 			channel = code & 0x0f;
 			command = code >> 4 & 0x0f;
-			txid = code >> 8 & 0xffff;
-			printf("0x%08lx Transmitter=0x%04x Unit=%d Command=%i\n", code, txid, channel, command);
+			xmitter = code >> 8 & 0xffff;
+			printf("0x%08lx Transmitter=0x%04x Unit=%d Command=%i\n", code, xmitter, channel, command);
 		}
 		clock = 1; // next is a clock pulse
 		return;
@@ -273,11 +273,11 @@ int main(int argc, char **argv) {
 			printf("\n");
 			printf("decrypt %s <= 0x%08lx <= 0x%08lx\n", printbits(message, 0x01000110), message, code);
 
-			txid = decode_txid(message);
+			xmitter = decode_xmitter(message);
 			channel = decode_channel(message);
 			command = decode_command(message);
 			payload = decode_payload(message);
-			printf("Transmitter-Id = 0x%x    channel = %d    command = %d    payload = 0x%02x\n", txid, channel, command, payload);
+			printf("Transmitter-Id = 0x%x    channel = %d    command = %d    payload = 0x%02x\n", xmitter, channel, command, payload);
 		}
 	}
 }

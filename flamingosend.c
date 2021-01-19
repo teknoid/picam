@@ -172,6 +172,6 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	send28(TXID[remote - 1], channel - 'A' + 1, command ? 2 : 0, rolling);
+	send28(TRANSMITTER[remote - 1], channel - 'A' + 1, command ? 2 : 0, rolling);
 	// send24(remote, channel, command);
 }

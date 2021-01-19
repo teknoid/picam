@@ -9,7 +9,7 @@
 // https://forum.fhem.de/index.php/topic,36399.msg503530.html#msg503530
 //
 
-unsigned long encode(unsigned int txid, unsigned char channel, unsigned char command, unsigned char payload) {
+unsigned long encode(unsigned int xmitter, unsigned char channel, unsigned char command, unsigned char payload) {
 	unsigned long message = 0;
 	unsigned char n[7];							// 7 nibbles = 28bit
 	int i;
@@ -17,10 +17,10 @@ unsigned long encode(unsigned int txid, unsigned char channel, unsigned char com
 	// encode into nibbles
 	n[0] = channel & 0x0F;						// 0000 0000000000000000 0000 XXXX	channel
 	n[1] = command & 0x03;						// 0000 0000000000000000 00XX 0000	command
-	n[2] = txid & 0x0F;							// 0000 000000000000XXXX 0000 0000	transmitter id
-	n[3] = (txid >> 4) & 0x0F;					// 0000 00000000XXXX0000 0000 0000	transmitter id
-	n[4] = (txid >> 8) & 0x0F;					// 0000 0000XXXX00000000 0000 0000	transmitter id
-	n[5] = (txid >> 12) & 0x0F;					// 0000 XXXX000000000000 0000 0000	transmitter id
+	n[2] = xmitter & 0x0F;						// 0000 000000000000XXXX 0000 0000	transmitter id
+	n[3] = xmitter >> 4 & 0x0F;					// 0000 00000000XXXX0000 0000 0000	transmitter id
+	n[4] = xmitter >> 8 & 0x0F;					// 0000 0000XXXX00000000 0000 0000	transmitter id
+	n[5] = xmitter >> 12 & 0x0F;				// 0000 XXXX000000000000 0000 0000	transmitter id
 	n[6] = payload & 0x0F;						// XXXX 0000000000000000 0000 0000	payload
 
 	// build message
@@ -113,12 +113,12 @@ unsigned char decode_command(unsigned long message) {
 	return command;
 }
 
-unsigned int decode_txid(unsigned long message) {
-	unsigned int txid = message >> 8 & 0xFFFF;
-	return txid;
+unsigned int decode_xmitter(unsigned long message) {
+	unsigned int xmitter = message >> 8 & 0xFFFF;
+	return xmitter;
 }
 
 unsigned char decode_payload(unsigned long message) {
-	unsigned char command = message >> 24 & 0x0F;
-	return command;
+	unsigned char payload = message >> 24 & 0x0F;
+	return payload;
 }

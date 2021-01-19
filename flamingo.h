@@ -3,8 +3,8 @@
 
 #define REMOTES				4
 
-const static unsigned long TXID[REMOTES * 4] = { 0x53cc, 0x835a, 0x0000, 0x0000 };
-// 												 White1	 White2	 White3	 Black
+const static unsigned long TRANSMITTER[REMOTES * 4] = { 0x53cc, 0x835a, 0x0000, 0x0000 };
+// 														White1	White2	White3	Black
 
 // timings for 28bit and 24bit code sequences
 // tested with 1 C 1: min 180 max 350 --> 330 is closest to the original remote
