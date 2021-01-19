@@ -12,6 +12,8 @@ control wireless wall plugs and webcam by environment luminosity
 
 # News
 
+Jan 2021 implemented Flamingo 28bit Rolling Code enryption & decryption
+
 Sep 2019 git project + github upload
 
 ...
