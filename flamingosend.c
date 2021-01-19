@@ -12,28 +12,27 @@
 #include <sys/time.h>
 #include <wiringPi.h>
 
+#include "utils.h"
 #include "flamingo.h"
+#include "flamingocrypt.h"
+
+static struct timeval tNow, tLong, tEnd;
 
 static void _delay(unsigned int millis) {
-	struct timeval tNow, tLong, tEnd;
-
 	gettimeofday(&tNow, NULL);
 	tLong.tv_sec = millis / 1000000;
 	tLong.tv_usec = millis % 1000000;
 	timeradd(&tNow, &tLong, &tEnd);
-
 	while (timercmp(&tNow, &tEnd, <)) {
 		gettimeofday(&tNow, NULL);
 	}
 }
 
-static void send28(char remote, char channel, char command, char offset) {
-	unsigned int x = (remote - 1) * 4 + (channel - 'A');
-	unsigned int y = command * 4 + offset;
-	unsigned long code = FLAMINGO[x][y];
+static void send28(unsigned int txid, unsigned char channel, unsigned char command, unsigned char rolling) {
+	unsigned long message = encode(txid, channel, command, 0);
+	unsigned long code = encrypt(message, rolling);
 
-//	printf("remote %i channel %i command %i offset %i\n", remote, channel, command, offset);
-//	printf("sending FLAMINGO[%i][%i] code 0x%08lx %i\n", x, y, code, PULSE);
+	printf("sending %s => 0x%08lx => 0x%08lx\n", printbits(message, 0x01000110), message, code);
 
 	for (int repeat = 1; repeat <= 4; repeat++) {
 		unsigned long mask = 1 << 27;
@@ -64,9 +63,7 @@ static void send28(char remote, char channel, char command, char offset) {
 	}
 }
 
-static void send24(char remote, char channel, char command, char offset) {
-	unsigned int x = (remote - 1) * 4 + (channel - 'A');
-	unsigned int y = command * 4 + offset;
+static void send24(char remote, char channel, char command) {
 	unsigned long code = 0x00144114;
 
 	for (int repeat = 1; repeat <= 5; repeat++) {
@@ -98,12 +95,18 @@ static void send24(char remote, char channel, char command, char offset) {
 	}
 }
 
+static void send32_short(char remote, char channel, char command) {
+}
+
+static void send32_long(char remote, char channel, char command) {
+}
+
 static void usage() {
-	printf("Usage: flamingosend <remote> <channel> <command> [offset]\n");
+	printf("Usage: flamingosend <remote> <channel> <command> [rolling]\n");
 	printf("  <remote>  1, 2, 3, ...\n");
 	printf("  <channel> A, B, C, D\n");
 	printf("  <command> 0 - off, 1 - on\n");
-	printf("  [offset]  which one of the 4 codes to be sent\n");
+	printf("  [rolling]  rolling code index, 0...3\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -134,7 +137,7 @@ int main(int argc, char *argv[]) {
 	pinMode(TX, OUTPUT);
 
 	// remote 1, 2, 3, ...
-	char remote = atoi(argv[1]);
+	int remote = atoi(argv[1]);
 	if (remote < 1 || remote > REMOTES) {
 		printf("unknown remote %i\n", remote);
 		usage();
@@ -158,16 +161,17 @@ int main(int argc, char *argv[]) {
 		return EINVAL;
 	}
 
-	// optional: send one of the 4 control codes
-	int offset = 0;
+	// optional: send rolling code index
+	int rolling = 0;
 	if (argv[4] != NULL) {
-		offset = atoi(argv[4]);
-		if (offset < 0 || offset > 3) {
-			printf("wrong offset %i\n", offset);
+		rolling = atoi(argv[4]);
+		if (rolling < 0 || rolling > 3) {
+			printf("wrong rolling code index %i\n", rolling);
 			usage();
 			return EINVAL;
 		}
 	}
 
-	send24(remote, channel, command, offset);
+	send28(TXID[remote - 1], channel - 'A' + 1, command ? 2 : 0, rolling);
+	// send24(remote, channel, command);
 }
