@@ -1,5 +1,5 @@
-#define RX 					2
-#define TX  				0
+#define RX					2
+#define TX					0
 
 #define REMOTES				4
 
