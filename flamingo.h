@@ -6,25 +6,38 @@
 const static unsigned long TRANSMITTER[REMOTES * 4] = { 0x53cc, 0x835a, 0x0000, 0x0000 };
 // 														White1	White2	White3	Black
 
-// timings for 28bit and 24bit code sequences
+// timings for 28bit rc1 and 24bit rc4 patterns
 // tested with 1 C 1: min 180 max 350 --> 330 is closest to the original remote
-#define P2824				330
-const static unsigned long P2824X2 = P2824 * 2;
-const static unsigned long P2824X3 = P2824 * 3;
-const static unsigned long P2824X15 = P2824 * 15;
-const static unsigned long P2824X31 = P2824 * 31;
-const static unsigned long SYNCF28MIN = P2824X15 - 80;
-const static unsigned long SYNCF28MAX = P2824X15 + 80;
-const static unsigned long SYNCF24MIN = P2824X31 - 100;
-const static unsigned long SYNCF24MAX = P2824X31 + 100;
+#define T1					330
+const static unsigned long T1X2 = T1 * 2;
+const static unsigned long T1X3 = T1 * 3;
+const static unsigned long T1X15 = T1 * 15;
+const static unsigned long T1X31 = T1 * 31;
+const static unsigned long T1SMIN = T1X15 - 80;
+const static unsigned long T1SMAX = T1X15 + 80;
+const static unsigned long T4SMIN = T1X31 - 100;
+const static unsigned long T4SMAX = T1X31 + 100;
 
-// timings for 32bit code sequences
-#define P32					200
-const static unsigned long P32X2 = P32 * 2;
-const static unsigned long P32X14 = P32 * 14;
-const static unsigned long SYNCF32MIN = P32X14 - 50;
-const static unsigned long SYNCF32MAX = P32X14 + 50;
+// timings for 32bit rc2 patterns
+#define T2H					200
+#define T2L					330
+const static unsigned long T2X = (T2H + T2L) * 2 + T2L; // 1390 - low data bit delay
+const static unsigned long T2Y = T2X / 2; // 695 - decides 0 / 1
+const static unsigned long T2S = T2X * 2; // 2780 - low sync delay
+const static unsigned long T2SMIN = T2S - 50;
+const static unsigned long T2SMAX = T2S + 50;
 
+// timings for 32bit rc3 multibit patterns
+#define T3H					220
+#define T3L					330
+const static unsigned long T3X = T3H + T3L + T3L; // 880 - low delay to next clock
+const static unsigned long T3Y = T3H + T3L; // 550 - decides clock or data bit
+const static unsigned long T3S = 9250; // don't know how to calculate
+const static unsigned long T3SMIN = T3S - 50;
+const static unsigned long T3SMAX = T3S + 50;
+
+#define REPEAT_PAUSE1		5555
+#define REPEAT_PAUSE2		9999
 /*
  not necessary anymore to store codes here as we now able to calculate and encrypt them
  left here only for debugging purposes
