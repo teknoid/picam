@@ -67,7 +67,7 @@ static void isr28() {
 //
 // 5x rc4 pattern
 //
-// similar to is28 but only 24bit code without encryption
+// similar to isr28 but only 24bit code without encryption
 //
 static void isr24() {
 	// calculate pulse length; store timer value for next calculation; get pin state
@@ -141,7 +141,7 @@ static void isr32() {
 			channel = code & 0x0f;
 			command = code >> 4 & 0x0f;
 			xmitter = code >> 8 & 0xffff;
-			// printf("0x%08lx Transmitter=0x%04x Unit=%d Command=%i\n", code, xmitter, channel, command);
+			printf("0x%08lx Transmitter=0x%04x Unit=%d Command=%i\n", code, xmitter, channel, command);
 			printf("%s\n", printbits(code, 0x01000110));
 		}
 		clock = 1; // next is a clock pulse
@@ -169,8 +169,8 @@ static void isr32() {
 // 3x rc3 pattern
 //
 // similar to isr32_short but with longer sync
-// looks like a clock pulse but more than one data pulses follow
-// encoding not yet known, simply count the data bits after clock bit
+// looks like a clock pulse with more than one data pulses follow
+// encoding not yet known, simply count and print the data bits after clock bit
 static void isr32_multibit() {
 	// calculate pulse length; store timer value for next calculation; get pin state
 	gettimeofday(&tNow, NULL);
@@ -282,7 +282,7 @@ int main(int argc, char **argv) {
 		sleep(3);
 
 		if (loop_decode && !bits && code) {
-			// try to decrypt received code if we have a rc1 pattern code
+			// decrypt entire received rc1 rolling code
 			message = decrypt(code);
 
 			printf("\n");
