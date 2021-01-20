@@ -4,10 +4,22 @@
 
 #include "flamingocrypt.h"
 
-//
-// based on coding from Fuchks
-// https://forum.fhem.de/index.php/topic,36399.msg503530.html#msg503530
-//
+/**
+ *
+ * based on coding from Fuchks
+ * https://forum.fhem.de/index.php/topic,36399.msg503530.html#msg503530
+ *
+ * encoded message pattern
+ *
+ * 0000 0000000000000000 0000 XXXX	channel
+ * 0000 0000000000000000 00XX 0000	command
+ * 0000 0000000000000000 XX00 0000	rolling code id
+ * 0000 000000000000XXXX 0000 0000	transmitter id
+ * 0000 00000000XXXX0000 0000 0000	transmitter id
+ * 0000 0000XXXX00000000 0000 0000	transmitter id
+ * 0000 XXXX000000000000 0000 0000	transmitter id
+ * XXXX 0000000000000000 0000 0000	payload
+ */
 
 unsigned long encode(unsigned int xmitter, unsigned char channel, unsigned char command, unsigned char payload) {
 	unsigned long message = 0;
@@ -15,13 +27,13 @@ unsigned long encode(unsigned int xmitter, unsigned char channel, unsigned char 
 	int i;
 
 	// encode into nibbles
-	n[0] = channel & 0x0F;						// 0000 0000000000000000 0000 XXXX	channel
-	n[1] = command & 0x03;						// 0000 0000000000000000 00XX 0000	command
-	n[2] = xmitter & 0x0F;						// 0000 000000000000XXXX 0000 0000	transmitter id
-	n[3] = xmitter >> 0x04 & 0x0F;				// 0000 00000000XXXX0000 0000 0000	transmitter id
-	n[4] = xmitter >> 0x08 & 0x0F;				// 0000 0000XXXX00000000 0000 0000	transmitter id
-	n[5] = xmitter >> 0x0C & 0x0F;				// 0000 XXXX000000000000 0000 0000	transmitter id
-	n[6] = payload & 0x0F;						// XXXX 0000000000000000 0000 0000	payload
+	n[0] = channel & 0x0F;
+	n[1] = command & 0x03;
+	n[2] = xmitter & 0x0F;
+	n[3] = xmitter >> 4 & 0x0F;
+	n[4] = xmitter >> 8 & 0x0F;
+	n[5] = xmitter >> 12 & 0x0F;
+	n[6] = payload & 0x0F;
 
 	// build message
 	for (i = sizeof(n) - 1; i >= 0; i--) {
@@ -40,7 +52,7 @@ unsigned long encrypt(unsigned long message, unsigned char rolling) {
 	int i, r, idx;
 
 	// insert rolling code into message
-	message = message | (rolling << 6 & 0xC0);	// 0000 0000000000000000 XX00 0000	rolling code id
+	message = message | (rolling << 6 & 0xC0);
 
 	// split into nibbles
 	for (i = 0; i < sizeof(n); i++) {

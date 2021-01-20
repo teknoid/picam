@@ -17,9 +17,9 @@ static void brute_force(unsigned int xmitter, unsigned long m1, unsigned long m2
 			n[0] = x & 0x0F;
 			n[1] = x >> 4 & 0x0F;
 			n[2] = xmitter & 0x0F;
-			n[3] = xmitter >> 0x04 & 0x0F;
-			n[4] = xmitter >> 0x08 & 0x0F;
-			n[5] = xmitter >> 0x0C & 0x0F;
+			n[3] = xmitter >> 4 & 0x0F;
+			n[4] = xmitter >> 8 & 0x0F;
+			n[5] = xmitter >> 12 & 0x0F;
 			n[6] = y & 0x0F;
 
 			source = (n[6] << 24) | (n[5] << 20) | (n[4] << 16) | (n[3] << 12) | (n[2] << 8) | (n[1] << 4) | n[0];
