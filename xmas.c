@@ -19,12 +19,12 @@ static void* xmas(void *arg);
 
 static void flamingosend(char *cmd) {
 	char command[128];
-	int i;
-
-	strcpy(command, FLAMINGOSEND);
-	strcat(command, " ");
-	strcat(command, cmd);
-	for (i = 0; i < 5; i++) {
+	for (int i = 0; i < 4; i++) {
+		strcpy(command, FLAMINGOSEND);
+		strcat(command, " ");
+		strcat(command, cmd);
+		strcat(command, " ");
+		strcat(command, (char[2] ) { (char) i + '0', '\0' } );
 		int ret = system(command);
 		syslog(LOG_NOTICE, "executed %s returned %d", command, ret);
 		sleep(1);
