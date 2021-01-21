@@ -3,7 +3,7 @@
 
 #define REMOTES				4
 
-const static unsigned long TRANSMITTER[REMOTES * 4] = { 0x53cc, 0x835a, 0x0000, 0x0000 };
+const static unsigned long TRANSMITTER[REMOTES * 4] = { 0x53cc, 0x835a, 0x31e2, 0x295c };
 // 														White1	White2	White3	Black
 
 // timings for 28bit rc1 and 24bit rc4 patterns
@@ -38,6 +38,8 @@ const static unsigned int T3SMAX = T3S + 50;
 
 #define REPEAT_PAUSE1		5555
 #define REPEAT_PAUSE2		9999
+
+#define SPACEMASK			0x01000110
 
 /*
  not necessary anymore to store codes here as we now able to calculate and encrypt them

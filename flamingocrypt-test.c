@@ -36,35 +36,35 @@ static void brute_force(unsigned int xmitter, unsigned long m1, unsigned long m2
 			msg = (msg >> 2) | ((msg & 3) << 0x1A);
 
 			if (msg == m1 || msg == m2 || msg == m3 || msg == m4) {
-				printf("%s => 0x%08lx => 0x%08lx\n", printbits(source, 0x01000110), source, msg);
+				printf("%s => 0x%08lx => 0x%08lx\n", printbits(source, SPACEMASK), source, msg);
 			}
 		}
 	}
 }
 
 static void test() {
-	printf("\ntest rolling code encryption & decryption\n");
-	for (int r = 0; r < 4; r++) {
-		unsigned long msg1 = encode(TRANSMITTER[0], 2, 0, 0);
-		unsigned long code = encrypt(msg1, r);
-		printf("encrypt %s => 0x%08lx => 0x%08lx\n", printbits(msg1, 0x01000110), msg1, code);
-		unsigned long msg2 = decrypt(code);
-		printf("decrypt %s <= 0x%08lx <= 0x%08lx\n", printbits(msg2, 0x01000110), msg2, code);
-	}
-
-	printf("\ntest message decoding\n");
-	unsigned long msg = encode(TRANSMITTER[1], 1, 1, 0x05);
+	printf("\ntest message decryption & decoding\n");
+	unsigned long code = 0x0e4cee19;
+	unsigned long msg = decrypt(code);
 	unsigned int xmitter = decode_xmitter(msg);
 	unsigned char channel = decode_channel(msg);
 	unsigned char command = decode_command(msg);
 	unsigned char payload = decode_payload(msg);
-	printf("%s\n", printbits(msg, 0x01000110));
-	printf("Transmitter-Id = 0x%x    channel = %d    command = %d    payload = 0x%02x\n", xmitter, channel, command, payload);
+	printf("decrypt %s <= 0x%08lx <= 0x%08lx\n", printbits(msg, SPACEMASK), msg, code);
+	printf("  xmitter = 0x%x\n  channel = %d\n  command = %d\n  payload = 0x%02x\n", xmitter, channel, command, payload);
+
+	printf("\ntest rolling code encryption & decryption\n");
+	for (int r = 0; r < 4; r++) {
+		unsigned long msg1 = encode(xmitter, 2, 0, 0);
+		code = encrypt(msg1, r);
+		printf("encrypt %s => 0x%08lx => 0x%08lx\n", printbits(msg1, SPACEMASK), msg1, code);
+		unsigned long msg2 = decrypt(code);
+		printf("decrypt %s <= 0x%08lx <= 0x%08lx\n", printbits(msg2, SPACEMASK), msg2, code);
+	}
 
 	// put in here transmitter id and captured codes to see original message to these codes
 	printf("\ntest brute-force encryption\n");
-	brute_force(TRANSMITTER[0], 0x02796056, 0x025469de, 0x02779c76, 0x0274b462);
-
+	brute_force(xmitter, 0x0e70b8b9, 0x0e640ed1, 0x0e4cee19, 0x0e4e7e31);
 }
 
 int main(int argc, char *argv[]) {

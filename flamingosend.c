@@ -32,7 +32,7 @@ static void send28(unsigned int txid, unsigned char channel, unsigned char comma
 	unsigned long message = encode(txid, channel, command, 0);
 	unsigned long code = encrypt(message, rolling);
 
-	printf("rc1 sending %s => 0x%08lx => 0x%08lx\n", printbits(message, 0x01000110), message, code);
+	printf("rc1 sending %s => 0x%08lx => 0x%08lx\n", printbits(message, SPACEMASK), message, code);
 
 	for (int repeat = 1; repeat <= 4; repeat++) {
 		unsigned long mask = 1 << 27;
@@ -67,7 +67,7 @@ static void send28(unsigned int txid, unsigned char channel, unsigned char comma
 static void send24(unsigned int txid, unsigned char channel, unsigned char command) {
 	unsigned long message = 0x00144114;
 
-	printf("rc4 sending %s => 0x%08lx\n", printbits(message, 0x01000110), message);
+	printf("rc4 sending %s => 0x%08lx\n", printbits(message, SPACEMASK), message);
 
 	for (int repeat = 1; repeat <= 5; repeat++) {
 		unsigned long mask = 1 << 23;
@@ -102,7 +102,7 @@ static void send24(unsigned int txid, unsigned char channel, unsigned char comma
 static void send32(unsigned int txid, unsigned char channel, unsigned char command) {
 	unsigned long message = encode(txid, channel, command, 0);
 
-	printf("rc2 sending %s => 0x%08lx\n", printbits(message, 0x01000110), message);
+	printf("rc2 sending %s => 0x%08lx\n", printbits(message, SPACEMASK), message);
 
 	for (int repeat = 1; repeat <= 3; repeat++) {
 		unsigned long mask = 1 << 31;

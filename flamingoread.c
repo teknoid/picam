@@ -142,7 +142,7 @@ static void isr32() {
 			command = code >> 4 & 0x0f;
 			xmitter = code >> 8 & 0xffff;
 			printf("0x%08lx Transmitter=0x%04x Unit=%d Command=%i\n", code, xmitter, channel, command);
-			printf("%s\n", printbits(code, 0x01000110));
+			printf("%s\n", printbits(code, SPACEMASK));
 		}
 		clock = 1; // next is a clock pulse
 		return;
@@ -286,7 +286,7 @@ int main(int argc, char **argv) {
 			message = decrypt(code);
 
 			printf("\n");
-			printf("decrypt %s <= 0x%08lx <= 0x%08lx\n", printbits(message, 0x01000110), message, code);
+			printf("decrypt %s <= 0x%08lx <= 0x%08lx\n", printbits(message, SPACEMASK), message, code);
 
 			xmitter = decode_xmitter(message);
 			channel = decode_channel(message);
