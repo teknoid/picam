@@ -63,6 +63,9 @@ static void* webcam(void *arg) {
 		return (void *) 0;
 	}
 
+	// wait till network & nfs available
+	sleep(15);
+
 	// state unknown (e.g. system startup) --> check need for switching on
 	value = mcp3204_read();
 	if (value == 0) {

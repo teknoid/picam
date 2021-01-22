@@ -36,6 +36,7 @@ install:
 	install -m 0755 mcp /usr/local/bin
 	install -m 0755 flamingoread /usr/local/bin
 	install -m 0755 flamingosend /usr/local/bin
+	install -m 0755 flamingo-test /usr/local/bin
 	install -m 0755 mcp3204-test /usr/local/bin
 	systemctl start mcp
 
@@ -45,3 +46,9 @@ install-service:
 	install -m 0644 misc/mcp.service /usr/local/lib/systemd/system/
 	systemctl daemon-reload
 	systemctl enable mcp
+
+install-webcam:
+	@echo "[Installing webcam module]"
+	mkdir -p /home/www/webcam
+	cp -arv webcam/* /home/www/webcam
+	chown -R www-data.www-data /home/www/webcam
