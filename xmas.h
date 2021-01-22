@@ -5,19 +5,9 @@ typedef struct timing_t {
 	int on_m;								// soonest switch on minute
 	int off_h;								// latest switch off hour
 	int off_m;								// latest switch off minute
-	int xmitter;							// Transmitter-ID od remote control unit
+	int remote;								// index of remote control unit
 	char channel;							// channel of remote control unit
 } timing_t;
-
-static const timing_t timings[] = {
-	{ 1, 1, 15, 00, 22, 00, 0x53cc, 'A' }, // Monday
-	{ 1, 2, 15, 00, 22, 00, 0x53cc, 'A' },
-	{ 1, 3, 15, 00, 22, 00, 0x53cc, 'A' },
-	{ 1, 4, 15, 00, 22, 00, 0x53cc, 'A' },
-	{ 1, 5, 15, 00, 23, 00, 0x53cc, 'A' },
-	{ 1, 6, 15, 00, 23, 00, 0x53cc, 'A' },
-	{ 1, 0, 15, 00, 23, 00, 0x53cc, 'A' }, // Sunday
-};
 
 // light on: ↑later ↓earlier
 #define XMAS_SUNDOWN	2500
@@ -25,8 +15,18 @@ static const timing_t timings[] = {
 // light off: ↑earlier, ↓later
 #define XMAS_SUNRISE	3000
 
-#define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
-#define ZERO(a) memset(a, 0, sizeof(*a));
+// the remote control unit
+#define WHITE1				1
+
+static const timing_t timings[] = {
+	{ 1, 1, 15, 00, 22, 00, WHITE1, 'A' }, // Monday
+	{ 1, 2, 15, 00, 22, 00, WHITE1, 'A' },
+	{ 1, 3, 15, 00, 22, 00, WHITE1, 'A' },
+	{ 1, 4, 15, 00, 22, 00, WHITE1, 'A' },
+	{ 1, 5, 15, 00, 23, 00, WHITE1, 'A' },
+	{ 1, 6, 15, 00, 23, 00, WHITE1, 'A' },
+	{ 1, 0, 15, 00, 23, 00, WHITE1, 'A' }, // Sunday
+};
 
 int xmas_init(void);
 void xmas_close(void);

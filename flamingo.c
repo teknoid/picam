@@ -440,8 +440,16 @@ static void send32_multibit(unsigned int txid, unsigned char channel, unsigned c
 }
 
 void flamingo_send_rolling(int remote, char channel, int command, int rolling) {
+	if (remote < 1 || remote > sizeof(REMOTES)) {
+		return;
+	}
 	unsigned int transmitter = REMOTES[remote - 1];
 	unsigned char c = channel - 'A' + 1;
+
+#ifdef DEBUG
+	printf("flamingo_send_rolling 0x%x %d %d %d\n", transmitter, c, command, rolling);
+#endif
+
 	send28(transmitter, c, command ? 2 : 0, rolling);
 	send32(transmitter, c, (unsigned char) command);
 	send32_multibit(0, 0, 0);

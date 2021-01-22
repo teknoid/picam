@@ -11,7 +11,9 @@
 
 #include "mcp3204.h"
 #include "flamingo.h"
+#include "utils.h"
 
+// TODO define channel status for each remote control unit
 static char channel_status[128];
 
 static pthread_t thread_xmas;
@@ -19,18 +21,20 @@ static pthread_t thread_xmas;
 static void* xmas(void *arg);
 
 static void send_on(const timing_t *timing) {
-	int xmitter = timing->xmitter;
-	char channel = timing->channel;
-	if (!channel_status[(int) channel]) {
-		flamingo_send(xmitter, channel - 'A', 1);
+	int index = timing->channel - 'A';
+	if (!channel_status[index]) {
+		syslog(LOG_NOTICE, "flamingo_send %d %c 1\n", timing->remote, timing->channel);
+		flamingo_send(timing->remote, timing->channel, 1);
+		channel_status[index] = 1;
 	}
 }
 
 static void send_off(const timing_t *timing) {
-	int xmitter = timing->xmitter;
-	char channel = timing->channel;
-	if (!channel_status[(int) channel]) {
-		flamingo_send(xmitter, channel - 'A', 0);
+	int index = timing->channel - 'A';
+	if (channel_status[index]) {
+		syslog(LOG_NOTICE, "flamingo_send %d %c 0\n", timing->remote, timing->channel);
+		flamingo_send(timing->remote, timing->channel, 0);
+		channel_status[index] = 0;
 	}
 }
 
@@ -39,7 +43,7 @@ static void process(struct tm *now, const timing_t *timing) {
 	int curr = now->tm_hour * 60 + now->tm_min;
 	int from = timing->on_h * 60 + timing->on_m;
 	int to = timing->off_h * 60 + timing->off_m;
-	int on = channel_status[(int) timing->channel];
+	int on = channel_status[(int) timing->channel - 'A'];
 	int value;
 
 	if (from <= curr && curr <= to) {
