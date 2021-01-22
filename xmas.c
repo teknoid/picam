@@ -10,42 +10,27 @@
 #include <unistd.h>
 
 #include "mcp3204.h"
+#include "flamingo.h"
 
-static char status[128];
+static char channel_status[128];
 
 static pthread_t thread_xmas;
 
 static void* xmas(void *arg);
 
-static void flamingosend(char *cmd) {
-	char command[128];
-	for (int i = 0; i < 4; i++) {
-		strcpy(command, FLAMINGOSEND);
-		strcat(command, " ");
-		strcat(command, cmd);
-		strcat(command, " ");
-		strcat(command, (char[2] ) { (char) i + '0', '\0' } );
-		int ret = system(command);
-		syslog(LOG_NOTICE, "executed %s returned %d", command, ret);
-		sleep(1);
+static void send_on(const timing_t *timing) {
+	int xmitter = timing->xmitter;
+	char channel = timing->channel;
+	if (!channel_status[(int) channel]) {
+		flamingo_send(xmitter, channel - 'A', 1);
 	}
 }
 
-static void send_on(char code) {
-	if (!status[(int) code]) {
-		char cmd[6] = "1 x 1\0";
-		cmd[2] = code;
-		flamingosend(cmd);
-		status[(int) code] = 1;
-	}
-}
-
-static void send_off(char code) {
-	if (status[(int) code]) {
-		char cmd[6] = "1 x 0\0";
-		cmd[2] = code;
-		flamingosend(cmd);
-		status[(int) code] = 0;
+static void send_off(const timing_t *timing) {
+	int xmitter = timing->xmitter;
+	char channel = timing->channel;
+	if (!channel_status[(int) channel]) {
+		flamingo_send(xmitter, channel - 'A', 0);
 	}
 }
 
@@ -54,7 +39,7 @@ static void process(struct tm *now, const timing_t *timing) {
 	int curr = now->tm_hour * 60 + now->tm_min;
 	int from = timing->on_h * 60 + timing->on_m;
 	int to = timing->off_h * 60 + timing->off_m;
-	int on = status[(int) timing->code];
+	int on = channel_status[(int) timing->channel];
 	int value;
 
 	if (from <= curr && curr <= to) {
@@ -66,12 +51,12 @@ static void process(struct tm *now, const timing_t *timing) {
 				value = mcp3204_read();
 				if (value > XMAS_SUNDOWN) {
 					syslog(LOG_NOTICE, "reached XMAS_SUNDOWN at %i", value);
-					send_on(timing->code);
+					send_on(timing);
 				}
 			} else {
 				// morning: switch on
 				syslog(LOG_NOTICE, "reached ON trigger at %i:%i", timing->on_h, timing->on_m);
-				send_on(timing->code);
+				send_on(timing);
 			}
 		}
 	} else {
@@ -80,14 +65,14 @@ static void process(struct tm *now, const timing_t *timing) {
 			if (afternoon) {
 				// evening: switch off
 				syslog(LOG_NOTICE, "reached OFF trigger at %i:%i", timing->off_h, timing->off_m);
-				send_off(timing->code);
+				send_off(timing);
 			} else {
 				// morning: check if sunrise is reached an switch off
 				// syslog(LOG_NOTICE, "in OFF time, waiting for XMAS_SUNRISE");
 				value = mcp3204_read();
 				if (value < XMAS_SUNRISE) {
 					syslog(LOG_NOTICE, "reached XMAS_SUNRISE at %i", value);
-					send_off(timing->code);
+					send_off(timing);
 				}
 			}
 		}
@@ -98,7 +83,7 @@ int xmas_init() {
 	if (pthread_create(&thread_xmas, NULL, &xmas, NULL)) {
 		syslog(LOG_WARNING, "Error creating thread");
 	}
-	ZERO(status);
+	ZERO(channel_status);
 	return 0;
 }
 

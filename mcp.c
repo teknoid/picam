@@ -12,6 +12,7 @@
 #include "mcp3204.h"
 #include "webcam.h"
 #include "xmas.h"
+#include "flamingo.h"
 
 mcp_config_t *cfg;
 
@@ -59,6 +60,10 @@ static void daemonize() {
 }
 
 static void mcp_init() {
+	if (flamingo_init(0, 0) < 0) {
+		exit(EXIT_FAILURE);
+	}
+
 	if (mcp3204_init() < 0) {
 		exit(EXIT_FAILURE);
 	}

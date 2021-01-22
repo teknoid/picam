@@ -1,23 +1,23 @@
 CFLAGS = -Wall
 
-LIBS = -lpthread
+LIBS = -lpthread -lwiringPi -lrt
 
 SRCS = $(wildcard *.c)
 OBJS = $(SRCS:.c=.o)
 
-all: mcp flamingoread flamingosend flamingocrypt-test mcp3204-test
+all: mcp flamingoread flamingosend flamingo-test mcp3204-test
 
-mcp: mcp.o utils.o xmas.o mcp3204.o webcam.o
-	$(CC) $(CFLAGS) $(LIBS) -o mcp mcp.o utils.o xmas.o mcp3204.o webcam.o
+mcp: mcp.o utils.o xmas.o mcp3204.o webcam.o flamingo.o
+	$(CC) $(CFLAGS) $(LIBS) -o mcp mcp.o utils.o xmas.o mcp3204.o webcam.o flamingo.o
 
-flamingoread: flamingoread.o flamingocrypt.o utils.o 
-	$(CC) $(CFLAGS) $(LIBS) -lwiringPi -lrt -o flamingoread flamingoread.o flamingocrypt.o utils.o 
+flamingoread: flamingo.o flamingoread.o utils.o 
+	$(CC) $(CFLAGS) $(LIBS) -o flamingoread flamingoread.o flamingo.o utils.o 
 
-flamingosend: flamingosend.o flamingocrypt.o utils.o 
-	$(CC) $(CFLAGS) $(LIBS) -lwiringPi -lrt -o flamingosend flamingosend.o flamingocrypt.o utils.o 
+flamingosend: flamingo.o flamingosend.o utils.o 
+	$(CC) $(CFLAGS) $(LIBS) -o flamingosend flamingosend.o flamingo.o utils.o 
 
-flamingocrypt-test: flamingocrypt-test.o utils.o flamingocrypt.o utils.o
-	$(CC) $(CFLAGS) $(LIBS) -o flamingocrypt-test flamingocrypt-test.o flamingocrypt.o utils.o
+flamingo-test: flamingo-test.o flamingo.o utils.o
+	$(CC) $(CFLAGS) $(LIBS) -o flamingo-test flamingo-test.o flamingo.o utils.o
 
 mcp3204-test: mcp3204-test.o mcp3204.o utils.o 
 	$(CC) $(CFLAGS) $(LIBS) -o mcp3204-test mcp3204-test.o mcp3204.o utils.o 
@@ -28,7 +28,7 @@ mcp3204-test: mcp3204-test.o mcp3204.o utils.o
 .PHONY: clean install install-service
 
 clean:
-	rm -f *.o mcp flamingoread flamingosend mcp3204-test crypt
+	rm -f *.o *-test mcp flamingoread flamingosend
 
 install:
 	@echo "[Installing and starting mcp]"

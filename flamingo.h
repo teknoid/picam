@@ -1,10 +1,9 @@
 #define RX					2
 #define TX					0
 
-#define REMOTES				4
-
-const static unsigned long TRANSMITTER[REMOTES * 4] = { 0x53cc, 0x835a, 0x31e2, 0x295c };
-// 														White1	White2	White3	Black
+// transmitter id's of our known remote control units
+const static unsigned long REMOTES[4] = { 0x53cc, 0x835a, 0x31e2, 0x295c };
+//											White1	White2	White3	Black
 
 // timings for 28bit rc1 and 24bit rc4 patterns
 // tested with 1 C 1: min 180 max 350 --> 330 is closest to the original remote
@@ -41,9 +40,29 @@ const static unsigned int T3SMAX = T3S + 50;
 
 #define SPACEMASK			0x01000110
 
+// encryption key
+const static unsigned char CKEY[16] = { 9, 6, 3, 8, 10, 0, 2, 12, 4, 14, 7, 5, 1, 15, 11, 13 };
+
+// decryption key (invers encryption key - exchanged index & value)
+const static unsigned char DKEY[16] = { 5, 12, 6, 2, 8, 11, 1, 10, 3, 0, 4, 14, 7, 15, 9, 13 };
+
+typedef void (*flamingo_handler_t)(unsigned int, unsigned char, unsigned char, unsigned char);
+
+int flamingo_init(int pattern, flamingo_handler_t handler);
+void flamingo_close();
+
+void flamingo_send(int remote, char channel, int command);
+void flamingo_send_rolling(int remote, char channel, int command, int rolling);
+
+unsigned long encode(unsigned int xmitter, unsigned char channel, unsigned char command, unsigned char payload);
+unsigned long encrypt(unsigned long message);
+unsigned long encrypt_rolling(unsigned long message, unsigned char rolling);
+unsigned long decrypt(unsigned long code);
+void decode(unsigned long message, unsigned int *xmitter, unsigned char *channel, unsigned char *command, unsigned char *payload);
+
 /*
- not necessary anymore to store codes here as we now able to calculate and encrypt them
- left here only for debugging purposes
+
+ not necessary anymore to store codes here as we now able to calculate and encrypt them, left here only for debugging purposes
 
  const static unsigned long FLAMINGO[REMOTES * 4][8] = {
  //	Remote Name
