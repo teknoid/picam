@@ -23,7 +23,7 @@ static void* xmas(void *arg);
 static void send_on(const timing_t *timing) {
 	int index = timing->channel - 'A';
 	if (!channel_status[index]) {
-		syslog(LOG_NOTICE, "flamingo_send %d %c 1\n", timing->remote, timing->channel);
+		syslog(LOG_NOTICE, "flamingo_send_FA500 %d %c 1\n", timing->remote, timing->channel);
 		flamingo_send_FA500(timing->remote, timing->channel, 1, -1);
 		channel_status[index] = 1;
 	}
@@ -32,7 +32,7 @@ static void send_on(const timing_t *timing) {
 static void send_off(const timing_t *timing) {
 	int index = timing->channel - 'A';
 	if (channel_status[index]) {
-		syslog(LOG_NOTICE, "flamingo_send %d %c 0\n", timing->remote, timing->channel);
+		syslog(LOG_NOTICE, "flamingo_send_FA500 %d %c 0\n", timing->remote, timing->channel);
 		flamingo_send_FA500(timing->remote, timing->channel, 0, -1);
 		channel_status[index] = 0;
 	}

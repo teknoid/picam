@@ -48,7 +48,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	// optional: send rolling code index
-	int rolling = 0;
+	int rolling = -1;
 	if (argv[4] != NULL) {
 		rolling = atoi(argv[4]);
 		if (rolling < 0 || rolling > 3) {
@@ -56,12 +56,7 @@ int main(int argc, char *argv[]) {
 			usage();
 			return EINVAL;
 		}
-
-		flamingo_send_FA500(remote, channel, command, rolling);
-
-	} else {
-
-		flamingo_send_FA500(remote, channel, command, -1);
-
 	}
+
+	flamingo_send_FA500(remote, channel, command, rolling);
 }

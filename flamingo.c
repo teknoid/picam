@@ -7,11 +7,10 @@
  *
  * tested with following devices
  *
- * 	FA500R REMOTE
- * 	FA500S WIRELESS SWITCH UNIT
- *
- *  SF-500R CONTROL
- * 	SF-500P SWITCH
+ * FA500R REMOTE
+ * FA500S WIRELESS SWITCH UNIT
+ * SF-500R CONTROL
+ * SF-500P SWITCH
  *
  *
  * FA500R 28bit message pattern:
@@ -45,7 +44,7 @@
 #include "flamingo.h"
 #include "utils.h"
 
-#define DEBUG
+// #define DEBUG
 
 // global variables used in GPIO interrupt handler
 static unsigned long code, pulse;
