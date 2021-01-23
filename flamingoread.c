@@ -7,11 +7,12 @@
 #include "flamingo.h"
 
 static void usage() {
-	printf("Usage: flamingoread -1 | -2 | -3 | -4\n");
+	printf("Usage: flamingoread -1 | -2 | -3 | -4 | -5\n");
 	printf("  -1 ... detect 28bit rolling codes, rc1 pattern\n");
 	printf("  -2 ... detect 32bit messages, rc2 pattern\n");
 	printf("  -3 ... detect 32bit multibit messages, rc3 pattern (encoding still unknown)\n");
 	printf("  -4 ... detect 24bit messages, rc4 pattern\n");
+	printf("  -5 ... detect 32bit messages, rc2 pattern SF-500R message coding\n");
 }
 
 void handler(unsigned int xmitter, unsigned char channel, unsigned char command, unsigned char payload) {
@@ -22,7 +23,8 @@ int main(int argc, char **argv) {
 	int pattern;
 
 	// parse command line arguments
-	int c = getopt(argc, argv, "1234");
+	int c = getopt(argc, argv, "12345");
+
 	switch (c) {
 	case '1':
 		pattern = 1;
@@ -35,6 +37,9 @@ int main(int argc, char **argv) {
 		break;
 	case '4':
 		pattern = 4;
+		break;
+	case '5':
+		pattern = 5;
 		break;
 	default:
 		usage();

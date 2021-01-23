@@ -24,7 +24,7 @@ static void send_on(const timing_t *timing) {
 	int index = timing->channel - 'A';
 	if (!channel_status[index]) {
 		syslog(LOG_NOTICE, "flamingo_send %d %c 1\n", timing->remote, timing->channel);
-		flamingo_send(timing->remote, timing->channel, 1);
+		flamingo_send_FA500(timing->remote, timing->channel, 1, -1);
 		channel_status[index] = 1;
 	}
 }
@@ -33,7 +33,7 @@ static void send_off(const timing_t *timing) {
 	int index = timing->channel - 'A';
 	if (channel_status[index]) {
 		syslog(LOG_NOTICE, "flamingo_send %d %c 0\n", timing->remote, timing->channel);
-		flamingo_send(timing->remote, timing->channel, 0);
+		flamingo_send_FA500(timing->remote, timing->channel, 0, -1);
 		channel_status[index] = 0;
 	}
 }
@@ -54,12 +54,12 @@ static void process(struct tm *now, const timing_t *timing) {
 				// syslog(LOG_NOTICE, "in ON time, waiting for XMAS_SUNDOWN");
 				value = mcp3204_read();
 				if (value > XMAS_SUNDOWN) {
-					syslog(LOG_NOTICE, "reached XMAS_SUNDOWN at %i", value);
+					syslog(LOG_NOTICE, "reached XMAS_SUNDOWN at %d", value);
 					send_on(timing);
 				}
 			} else {
 				// morning: switch on
-				syslog(LOG_NOTICE, "reached ON trigger at %i:%i", timing->on_h, timing->on_m);
+				syslog(LOG_NOTICE, "reached ON trigger at %02d:%02d", timing->on_h, timing->on_m);
 				send_on(timing);
 			}
 		}
@@ -68,14 +68,14 @@ static void process(struct tm *now, const timing_t *timing) {
 		if (on) {
 			if (afternoon) {
 				// evening: switch off
-				syslog(LOG_NOTICE, "reached OFF trigger at %i:%i", timing->off_h, timing->off_m);
+				syslog(LOG_NOTICE, "reached OFF trigger at %02d:%02d", timing->off_h, timing->off_m);
 				send_off(timing);
 			} else {
 				// morning: check if sunrise is reached an switch off
 				// syslog(LOG_NOTICE, "in OFF time, waiting for XMAS_SUNRISE");
 				value = mcp3204_read();
 				if (value < XMAS_SUNRISE) {
-					syslog(LOG_NOTICE, "reached XMAS_SUNRISE at %i", value);
+					syslog(LOG_NOTICE, "reached XMAS_SUNRISE at %d", value);
 					send_off(timing);
 				}
 			}

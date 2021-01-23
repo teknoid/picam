@@ -2,14 +2,19 @@
  *
  * Library for sending and receiving 433MHz ELRO Flamingo home device messages
  *
+ * Copyright (C) 01/2021 by teknoid
+ *
+ *
  * tested with following devices
  *
  * 	FA500R REMOTE
  * 	FA500S WIRELESS SWITCH UNIT
+ *
+ *  SF-500R CONTROL
  * 	SF-500P SWITCH
  *
  *
- * message pattern:
+ * FA500R 28bit message pattern:
  *
  * 0000 0000000000000000 0000 XXXX	channel
  * 0000 0000000000000000 00XX 0000	command
@@ -17,7 +22,13 @@
  * 0000 XXXXXXXXXXXXXXXX 0000 0000	transmitter id
  * XXXX 0000000000000000 0000 0000	payload
  *
- * Copyright (C) 01/2021 by teknoid
+ *
+ * SF-500R 32bit message pattern - guessed - looks like transmitter id is moved left
+ *
+ * 0000000000000000 00000000 0000 XXXX	channel
+ * 0000000000000000 00000000 XXXX 0000	command
+ * 0000000000000000 XXXXXXXX 0000 0000	payload
+ * XXXXXXXXXXXXXXXX 00000000 0000 0000	transmitter id
  *
  */
 
@@ -34,7 +45,7 @@
 #include "flamingo.h"
 #include "utils.h"
 
-// #define DEBUG
+#define DEBUG
 
 // global variables used in GPIO interrupt handler
 static unsigned long code, pulse;
@@ -45,7 +56,8 @@ static pthread_t thread_flamingo;
 
 static void* flamingo(void *arg);
 
-flamingo_handler_t flamingo_handler;
+int flamingoread_pattern;
+flamingo_handler_t flamingoread_handler;
 
 static void _delay(unsigned int millis) {
 	gettimeofday(&tNow, NULL);
@@ -58,7 +70,7 @@ static void _delay(unsigned int millis) {
 }
 
 //
-// 4x rc1 pattern
+// rc1 pattern
 //
 // short high pulse followed by long low pulse or long high + short low pulse, no clock
 //       _              ___
@@ -105,7 +117,7 @@ static void isr28() {
 }
 
 //
-// 5x rc4 pattern
+// rc4 pattern
 //
 // similar to isr28 but only 24bit code without encryption
 //
@@ -148,7 +160,7 @@ static void isr24() {
 }
 
 //
-// 3x rc2 pattern
+// rc2 pattern
 //
 // clock pulse + data pulse, either short or long distance from clock to data pulse
 //       _   _               _      _
@@ -197,19 +209,26 @@ static void isr32() {
 	// check for sync LOW pulses
 	if (state == 1) {
 		// a rising edge
-		if (T2SMIN < pulse && pulse < T2SMAX) {
+		if (T2S1MIN < pulse && pulse < T2S1MAX) {
 			code = 0;
 			bits = 32;
 			clockbit = 0; // this is the first clock pulse
 #ifdef DEBUG
-					printf("32bit LOW sync %lu :: ", pulse);
+			printf("32bit LOW sync %lu :: ", pulse);
+#endif
+		} else if (T2S2MIN < pulse && pulse < T2S2MAX) {
+			code = 0;
+			bits = 32;
+			clockbit = 0; // this is the first clock pulse
+#ifdef DEBUG
+			printf("32bit LOW sync %lu :: ", pulse);
 #endif
 		}
 	}
 }
 
 //
-// 3x rc3 pattern
+// rc3 pattern
 //
 // similar to isr32_short but with longer sync
 // looks like a clock pulse with more than one data pulses follow
@@ -259,15 +278,9 @@ static void isr32_multibit() {
 	}
 }
 
-static void send28(unsigned int txid, unsigned char channel, unsigned char command, unsigned char rolling) {
-	unsigned long message = encode(txid, channel, command, 0);
-	unsigned long code = encrypt_rolling(message, rolling);
-
-#ifdef DEBUG
-	printf("rc1 sending %s => 0x%08lx => 0x%08lx\n", printbits(message, SPACEMASK), message, code);
-#endif
-
-	for (int repeat = 1; repeat <= 4; repeat++) {
+// rc1 pattern
+static void send28(unsigned long m, int r) {
+	while (r--) {
 		unsigned long mask = 1 << 27;
 
 		// sync
@@ -277,7 +290,7 @@ static void send28(unsigned int txid, unsigned char channel, unsigned char comma
 		_delay(T1X15);
 
 		while (mask) {
-			if (code & mask) {
+			if (m & mask) {
 				// 1
 				digitalWrite(TX, 1);
 				_delay(T1X3);
@@ -297,14 +310,9 @@ static void send28(unsigned int txid, unsigned char channel, unsigned char comma
 	usleep(REPEAT_PAUSE1);
 }
 
-static void send24(unsigned int txid, unsigned char channel, unsigned char command) {
-	unsigned long message = 0x00144114;
-
-#ifdef DEBUG
-	printf("rc4 sending %s => 0x%08lx\n", printbits(message, SPACEMASK), message);
-#endif
-
-	for (int repeat = 1; repeat <= 5; repeat++) {
+// rc4 pattern
+static void send24(unsigned long m, int r) {
+	while (r--) {
 		unsigned long mask = 1 << 23;
 
 		// sync
@@ -314,7 +322,7 @@ static void send24(unsigned int txid, unsigned char channel, unsigned char comma
 		_delay(T1X31);
 
 		while (mask) {
-			if (message & mask) {
+			if (m & mask) {
 				// 1
 				digitalWrite(TX, 1);
 				_delay(T1X3);
@@ -334,24 +342,19 @@ static void send24(unsigned int txid, unsigned char channel, unsigned char comma
 	usleep(REPEAT_PAUSE2);
 }
 
-static void send32(unsigned int txid, unsigned char channel, unsigned char command) {
-	unsigned long message = encode(txid, channel, command, 0);
-
-#ifdef DEBUG
-	printf("rc2 sending %s => 0x%08lx\n", printbits(message, SPACEMASK), message);
-#endif
-
-	for (int repeat = 1; repeat <= 3; repeat++) {
+// rc2
+static void send32(unsigned long m, int r) {
+	while (r--) {
 		unsigned long mask = 1 << 31;
 
 		// sync
 		digitalWrite(TX, 1);
 		_delay(T2H);
 		digitalWrite(TX, 0);
-		_delay(T2S);
+		_delay(T2S1);
 
 		while (mask) {
-			if (message & mask) {
+			if (m & mask) {
 				// 1
 				digitalWrite(TX, 1);
 				_delay(T2H);
@@ -383,32 +386,34 @@ static void send32(unsigned int txid, unsigned char channel, unsigned char comma
 		_delay(T2L);
 
 		// wait before sending next sync
-		_delay(4 * T2S);
+		_delay(4 * T2S1);
 	}
 	usleep(REPEAT_PAUSE2);
 }
 
-static void send32_multibit(unsigned int txid, unsigned char channel, unsigned char command) {
+// rc3
+static void send32_multibit(char *m, int r) {
 	unsigned char bits[32];
 
 	char m1[] = "00300030001011200111104002100210"; // on
-	char m2[] = "00300030001011200111104003000210"; // off
-	char *c = command ? m1 : m2;
+	//char m2[] = "00300030001011200111104003000210"; // off
+	m = m1;
 
 	// create multibit array from string
+	char *c = m;
 	for (int i = 0; i < 32; i++) {
 		bits[i] = *c++ - '0';
 	}
 
-#ifdef DEBUG
-	printf("rc3 sending ");
-	for (int i = 0; i < 32; i++) {
-		printf("%d", bits[i]);
-	}
-	printf("\n");
-#endif
+//#ifdef DEBUG
+//	printf("rc3 sending ");
+//	for (int i = 0; i < 32; i++) {
+//		printf("%d", bits[i]);
+//	}
+//	printf("\n");
+//#endif
 
-	for (int repeat = 1; repeat <= 3; repeat++) {
+	while (r--) {
 
 		// sync
 		digitalWrite(TX, 1);
@@ -437,42 +442,6 @@ static void send32_multibit(unsigned int txid, unsigned char channel, unsigned c
 		}
 	}
 	usleep(REPEAT_PAUSE2);
-}
-
-void flamingo_send_rolling(int remote, char channel, int command, int rolling) {
-	if (remote < 1 || remote > sizeof(REMOTES)) {
-		return;
-	}
-	unsigned int transmitter = REMOTES[remote - 1];
-	unsigned char c = channel - 'A' + 1;
-
-#ifdef DEBUG
-	printf("flamingo_send_rolling 0x%x %d %d %d\n", transmitter, c, command, rolling);
-#endif
-
-	send28(transmitter, c, command ? 2 : 0, rolling);
-	send32(transmitter, c, (unsigned char) command);
-	send32_multibit(0, 0, 0);
-	send24(0, 0, 0);
-}
-
-void flamingo_send(int remote, char channel, int command) {
-	for (int i = 0; i < 4; i++) {
-		flamingo_send_rolling(remote, channel, command, i);
-		sleep(1);
-	}
-}
-
-unsigned long encode(unsigned int xmitter, unsigned char channel, unsigned char command, unsigned char payload) {
-	unsigned long message = (payload & 0x0F) << 24 | xmitter << 8 | (command & 0x03) << 4 | (channel & 0x0F);
-	return message;
-}
-
-void decode(unsigned long message, unsigned int *xmitter, unsigned char *channel, unsigned char *command, unsigned char *payload) {
-	*payload = message >> 24 & 0x0F;
-	*xmitter = message >> 8 & 0xFFFF;
-	*command = message >> 4 & 0x03;
-	*channel = message & 0x0F;
 }
 
 unsigned long encrypt(unsigned long message) {
@@ -538,10 +507,84 @@ unsigned long decrypt(unsigned long code) {
 	return message;
 }
 
-unsigned long encrypt_rolling(unsigned long message, unsigned char rolling) {
-	// insert rolling code into message
-	message = message | (rolling << 6 & 0xC0);
-	return encrypt(message);
+unsigned long encode_FA500(unsigned int xmitter, unsigned char channel, unsigned char command, unsigned char payload, unsigned char rolling) {
+	unsigned long message = (payload & 0x0F) << 24 | xmitter << 8 | (rolling << 6 & 0xC0) | (command & 0x03) << 4 | (channel & 0x0F);
+	return message;
+}
+
+unsigned long encode_SF500(unsigned int xmitter, unsigned char channel, unsigned char command, unsigned char payload) {
+	// TODO
+	return 0;
+}
+
+void decode_FA500(unsigned long message, unsigned int *xmitter, unsigned char *channel, unsigned char *command, unsigned char *payload, unsigned char *rolling) {
+	*payload = message >> 24 & 0x0F;
+	*xmitter = message >> 8 & 0xFFFF;
+	*rolling = message >> 6 & 0x03;
+	*command = message >> 4 & 0x03;
+	*channel = message & 0x0F;
+}
+
+void decode_SF500(unsigned long message, unsigned int *xmitter, unsigned char *channel, unsigned char *command, unsigned char *payload) {
+	*xmitter = message >> 16 & 0xFFFF;
+	*payload = message >> 8 & 0x0F;
+	*command = message >> 4 & 0x03;
+	*channel = message & 0x0F;
+}
+
+void flamingo_send_FA500(int remote, char channel, int command, int rolling) {
+	if (remote < 1 || remote > ARRAY_SIZE(REMOTES)) {
+		return;
+	}
+	if (channel < 'A' || channel > 'P') {
+		return;
+	}
+
+	unsigned int transmitter = REMOTES[remote - 1];
+
+	if (0 <= rolling && rolling <= 4) {
+
+		// send specified rolling code
+		unsigned long message = encode_FA500(transmitter, channel - 'A' + 1, command, 0, rolling);
+		unsigned long code = encrypt(message);
+#ifdef DEBUG
+		printf("FA500 %d %c %d %d => 0x%08lx %s => 0x%08lx\n", remote, channel, command, rolling, message, printbits(message, SPACEMASK_FA500), code);
+#endif
+		send28(code, 4);
+		send32(message, 3);
+		send32_multibit(0, 3); // TODO
+		send24(0x00144114, 5); // TODO
+
+	} else {
+
+		// send all rolling codes in sequence
+		for (int r = 0; r < 4; r++) {
+
+			unsigned long message = encode_FA500(transmitter, channel - 'A' + 1, command, 0, r);
+			unsigned long code = encrypt(message);
+#ifdef DEBUG
+			printf("FA500 %d %c %d %d => 0x%08lx %s => 0x%08lx\n", remote, channel, command, r, message, printbits(message, SPACEMASK_FA500), code);
+#endif
+			send28(code, 4);
+			send32(message, 3);
+			send32_multibit(0, 3); // TODO
+			send24(0x00144114, 5); // TODO
+			sleep(1);
+		}
+	}
+}
+
+void flamingo_send_SF500(int remote, char channel, int command) {
+	if (remote < 1 || remote > ARRAY_SIZE(REMOTES)) {
+		return;
+	}
+
+	unsigned int transmitter = REMOTES[remote - 1];
+	unsigned long message = encode_SF500(transmitter, channel - 'A' + 1, command, 0);
+#ifdef DEBUG
+	printf("SF500 %d %d %d => 0x%08lx %s\n", remote, channel, command, message, printbits(message, SPACEMASK_SF500));
+#endif
+	send32(message, 5);
 }
 
 int flamingo_init(int pattern, flamingo_handler_t handler) {
@@ -568,7 +611,8 @@ int flamingo_init(int pattern, flamingo_handler_t handler) {
 
 	// for code receiving start a thread to decrypt and handle codes
 	if (pattern && handler) {
-		flamingo_handler = handler;
+		flamingoread_pattern = pattern;
+		flamingoread_handler = handler;
 		if (pthread_create(&thread_flamingo, NULL, &flamingo, NULL)) {
 			perror("Error creating thread");
 			return -1;
@@ -623,6 +667,14 @@ int flamingo_init(int pattern, flamingo_handler_t handler) {
 			printf("listen to 24bit rc4 codes...\n");
 #endif
 			break;
+		case 5:
+			if (wiringPiISR(RX, INT_EDGE_BOTH, &isr32) < 0) {
+				return -1;
+			}
+#ifdef DEBUG
+			printf("listen to 32bit rc2 with SF-500R message coding...\n");
+#endif
+			break;
 		}
 	}
 
@@ -643,7 +695,7 @@ void flamingo_close() {
 static void* flamingo(void *arg) {
 	unsigned long message;
 	unsigned int xmitter;
-	unsigned char channel, command, payload;
+	unsigned char channel, command, payload, rolling;
 
 	if (pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL)) {
 		perror("Error setting pthread_setcancelstate");
@@ -665,17 +717,24 @@ static void* flamingo(void *arg) {
 		} else {
 			message = code;
 		}
-		decode(message, &xmitter, &channel, &command, &payload);
+
+		if (flamingoread_pattern == 5) {
+			decode_SF500(message, &xmitter, &channel, &command, &payload);
+		} else {
+			decode_FA500(message, &xmitter, &channel, &command, &payload, &rolling);
+		}
+
+#ifdef DEBUG
+		unsigned long spacemask = flamingoread_pattern == 5 ? SPACEMASK_FA500 : SPACEMASK_SF500;
+		printf("decrypt %s <= 0x%08lx <= 0x%08lx\n", printbits(message, spacemask), message, code);
+		printf("  xmitter = 0x%x\n  channel = %d\n  command = %d\n  payload = 0x%02x\n", xmitter, channel, command, payload);
+#endif
 
 		// validate received message against defined transmitter id's
-		for (int i = 0; i < sizeof(REMOTES); i++) {
+		for (int i = 0; i < ARRAY_SIZE(REMOTES); i++) {
 			if (xmitter == REMOTES[i]) {
-#ifdef DEBUG
-				printf("decrypt %s <= 0x%08lx <= 0x%08lx\n", printbits(message, SPACEMASK), message, code);
-				printf("  xmitter = 0x%x\n  channel = %d\n  command = %d\n  payload = 0x%02x\n", xmitter, channel, command, payload);
-#endif
 				// call handler
-				(flamingo_handler)(xmitter, channel, command, payload);
+				(flamingoread_handler)(xmitter, channel, command, payload);
 			}
 		}
 

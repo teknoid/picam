@@ -2,8 +2,8 @@
 #define TX					0
 
 // transmitter id's of our known remote control units
-const static unsigned long REMOTES[4] = { 0x53cc, 0x835a, 0x31e2, 0x295c };
-//											White1	White2	White3	Black
+const static unsigned long REMOTES[5] = { 0x53cc, 0x835a, 0x31e2, 0x295c, 0x272d };
+//											White1	White2	White3	Black	SF500
 
 // timings for 28bit rc1 and 24bit rc4 patterns
 // tested with 1 C 1: min 180 max 350 --> 330 is closest to the original remote
@@ -22,9 +22,12 @@ const static unsigned int T4SMAX = T1X31 + 100;
 #define T2L					330
 const static unsigned int T2X = (T2H + T2L) * 2 + T2L; // 1390 - low data bit delay
 const static unsigned int T2Y = T2X / 2; // 695 - decides 0 / 1
-const static unsigned int T2S = T2X * 2; // 2780 - low sync delay
-const static unsigned int T2SMIN = T2S - 50;
-const static unsigned int T2SMAX = T2S + 50;
+const static unsigned int T2S1 = T2X * 2; // 2780 - low sync delay (FA500R)
+const static unsigned int T2S1MIN = T2S1 - 50;
+const static unsigned int T2S1MAX = T2S1 + 50;
+const static unsigned int T2S2 = T2L * 8; // 2640 - low sync delay (SF500R)
+const static unsigned int T2S2MIN = T2S2 - 50;
+const static unsigned int T2S2MAX = T2S2 + 50;
 
 // timings for 32bit rc3 multibit patterns
 #define T3H					220
@@ -38,7 +41,8 @@ const static unsigned int T3SMAX = T3S + 50;
 #define REPEAT_PAUSE1		5555
 #define REPEAT_PAUSE2		9999
 
-#define SPACEMASK			0x01000110
+#define SPACEMASK_FA500		0x01000110
+#define SPACEMASK_SF500		0x00010110
 
 // encryption key
 const static unsigned char CKEY[16] = { 9, 6, 3, 8, 10, 0, 2, 12, 4, 14, 7, 5, 1, 15, 11, 13 };
@@ -48,17 +52,20 @@ const static unsigned char DKEY[16] = { 5, 12, 6, 2, 8, 11, 1, 10, 3, 0, 4, 14, 
 
 typedef void (*flamingo_handler_t)(unsigned int, unsigned char, unsigned char, unsigned char);
 
+unsigned long encrypt(unsigned long message);
+unsigned long decrypt(unsigned long code);
+
 int flamingo_init(int pattern, flamingo_handler_t handler);
 void flamingo_close();
 
-void flamingo_send(int remote, char channel, int command);
-void flamingo_send_rolling(int remote, char channel, int command, int rolling);
+void flamingo_send_FA500(int remote, char channel, int command, int rolling);
+void flamingo_send_SF500(int remote, char channel, int command);
 
-unsigned long encode(unsigned int xmitter, unsigned char channel, unsigned char command, unsigned char payload);
-unsigned long encrypt(unsigned long message);
-unsigned long encrypt_rolling(unsigned long message, unsigned char rolling);
-unsigned long decrypt(unsigned long code);
-void decode(unsigned long message, unsigned int *xmitter, unsigned char *channel, unsigned char *command, unsigned char *payload);
+unsigned long encode_FA500(unsigned int xmitter, unsigned char channel, unsigned char command, unsigned char payload, unsigned char rolling);
+unsigned long encode_SF500(unsigned int xmitter, unsigned char channel, unsigned char command, unsigned char payload);
+
+void decode_FA500(unsigned long message, unsigned int *xmitter, unsigned char *channel, unsigned char *command, unsigned char *payload, unsigned char *rolling);
+void decode_SF500(unsigned long message, unsigned int *xmitter, unsigned char *channel, unsigned char *command, unsigned char *payload);
 
 /*
 

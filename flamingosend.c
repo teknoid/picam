@@ -57,11 +57,11 @@ int main(int argc, char *argv[]) {
 			return EINVAL;
 		}
 
-		flamingo_send_rolling(remote, channel, command, rolling);
+		flamingo_send_FA500(remote, channel, command, rolling);
 
 	} else {
 
-		flamingo_send(remote, channel, command);
+		flamingo_send_FA500(remote, channel, command, -1);
 
 	}
 }
