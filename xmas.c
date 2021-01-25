@@ -1,13 +1,12 @@
 #include "xmas.h"
 
-#include <bits/types/struct_tm.h>
-#include <bits/types/time_t.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
 #include "mcp3204.h"
 #include "flamingo.h"
@@ -109,6 +108,19 @@ static void* xmas(void *arg) {
 	int value = mcp3204_read();
 	if (value == 0) {
 		syslog(LOG_NOTICE, "mcp3204_read returned 0 ?");
+		return (void *) 0;
+	}
+
+	// Set our thread to MAX priority
+	struct sched_param sp;
+	memset(&sp, 0, sizeof(sp));
+	sp.sched_priority = sched_get_priority_max(SCHED_FIFO);
+	if (sched_setscheduler(0, SCHED_FIFO, &sp)) {
+		return (void *) 0;
+	}
+
+	// Lock memory to ensure no swapping is done.
+	if (mlockall(MCL_FUTURE | MCL_CURRENT)) {
 		return (void *) 0;
 	}
 

@@ -35,9 +35,9 @@
 #include <sched.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 #include <sys/mman.h>
 #include <sys/time.h>
-#include <unistd.h>
 
 #include <wiringPi.h>
 
@@ -544,7 +544,7 @@ void flamingo_send_FA500(int remote, char channel, int command, int rolling) {
 	if (0 <= rolling && rolling <= 4) {
 
 		// send specified rolling code
-		unsigned long message = encode_FA500(transmitter, channel - 'A' + 1, command, 0, rolling);
+		unsigned long message = encode_FA500(transmitter, channel - 'A' + 1, command ? 2 : 0, 0, rolling);
 		unsigned long code = encrypt(message);
 #ifdef DEBUG
 		printf("FA500 %d %c %d %d => 0x%08lx %s => 0x%08lx\n", remote, channel, command, rolling, message, printbits(message, SPACEMASK_FA500), code);
@@ -559,7 +559,7 @@ void flamingo_send_FA500(int remote, char channel, int command, int rolling) {
 		// send all rolling codes in sequence
 		for (int r = 0; r < 4; r++) {
 
-			unsigned long message = encode_FA500(transmitter, channel - 'A' + 1, command, 0, r);
+			unsigned long message = encode_FA500(transmitter, channel - 'A' + 1, command ? 2 : 0, 0, r);
 			unsigned long code = encrypt(message);
 #ifdef DEBUG
 			printf("FA500 %d %c %d %d => 0x%08lx %s => 0x%08lx\n", remote, channel, command, r, message, printbits(message, SPACEMASK_FA500), code);
@@ -594,19 +594,6 @@ int flamingo_init(int pattern, flamingo_handler_t handler) {
 
 	// GPIO pin connected to 433MHz sender module
 	pinMode(TX, OUTPUT);
-
-	// Set our thread to MAX priority
-	struct sched_param sp;
-	memset(&sp, 0, sizeof(sp));
-	sp.sched_priority = sched_get_priority_max(SCHED_FIFO);
-	if (sched_setscheduler(0, SCHED_FIFO, &sp)) {
-		return -1;
-	}
-
-	// Lock memory to ensure no swapping is done.
-	if (mlockall(MCL_FUTURE | MCL_CURRENT)) {
-		return -1;
-	}
 
 	// for code receiving start a thread to decrypt and handle codes
 	if (pattern && handler) {
@@ -698,6 +685,19 @@ static void* flamingo(void *arg) {
 
 	if (pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL)) {
 		perror("Error setting pthread_setcancelstate");
+		return (void *) 0;
+	}
+
+	// Set our thread to MAX priority
+	struct sched_param sp;
+	memset(&sp, 0, sizeof(sp));
+	sp.sched_priority = sched_get_priority_max(SCHED_FIFO);
+	if (sched_setscheduler(0, SCHED_FIFO, &sp)) {
+		return (void *) 0;
+	}
+
+	// Lock memory to ensure no swapping is done.
+	if (mlockall(MCL_FUTURE | MCL_CURRENT)) {
 		return (void *) 0;
 	}
 
