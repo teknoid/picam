@@ -38,8 +38,8 @@ static void flamingo_test_decrypt(unsigned long code) {
 	decode_FA500(message, &xmitter, &channel, &command, &payload, &rolling);
 	printf("decrypt %s <= 0x%08lx <= 0x%08lx\n", printbits(message, SPACEMASK_FA500), message, code);
 	printf("  xmitter = 0x%x\n  channel = %d\n  command = %d\n  payload = 0x%02x\n", xmitter, channel, command, payload);
-	// validate against defined transmitter id's
 
+	// validate against defined transmitter id's
 	for (int i = 0; i < ARRAY_SIZE(REMOTES); i++) {
 		if (xmitter == REMOTES[i]) {
 			printf("  Transmitter valid, index=%d\n", i);
@@ -94,6 +94,7 @@ int main(int argc, char *argv[]) {
 	// test deadbeef
 	flamingo_test_deadbeef();
 
+	// decrypt all codes from command line
 	if (argc > 1) {
 		for (int i = 1; i < argc; i++) {
 			unsigned long code = strtoul(argv[i], NULL, 0);

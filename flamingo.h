@@ -52,14 +52,14 @@ const static unsigned char DKEY[16] = { 5, 12, 6, 2, 8, 11, 1, 10, 3, 0, 4, 14, 
 
 typedef void (*flamingo_handler_t)(unsigned int, unsigned char, unsigned char, unsigned char);
 
-unsigned long encrypt(unsigned long message);
-unsigned long decrypt(unsigned long code);
-
 int flamingo_init(int pattern, flamingo_handler_t handler);
 void flamingo_close();
 
 void flamingo_send_FA500(int remote, char channel, int command, int rolling);
 void flamingo_send_SF500(int remote, char channel, int command);
+
+unsigned long encrypt(unsigned long message);
+unsigned long decrypt(unsigned long code);
 
 unsigned long encode_FA500(unsigned int xmitter, unsigned char channel, unsigned char command, unsigned char payload, unsigned char rolling);
 unsigned long encode_SF500(unsigned int xmitter, unsigned char channel, unsigned char command, unsigned char payload);

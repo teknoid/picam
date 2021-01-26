@@ -19,9 +19,6 @@ int main(int argc, char *argv[]) {
 		return EXIT_FAILURE;
 	}
 
-	// initialize without receive support
-	flamingo_init(0, 0);
-
 	// remote 1, 2, 3, ...
 	int remote = atoi(argv[1]);
 	if (remote < 1 || remote > sizeof(REMOTES)) {
@@ -57,6 +54,9 @@ int main(int argc, char *argv[]) {
 			return EINVAL;
 		}
 	}
+
+	// initialize without receive support
+	flamingo_init(0, 0);
 
 	flamingo_send_FA500(remote, channel, command, rolling);
 }
