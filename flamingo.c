@@ -563,7 +563,7 @@ void flamingo_send_FA500(int remote, char channel, int command, int rolling) {
 		// send all rolling codes in sequence
 		for (int r = 0; r < 4; r++) {
 
-			unsigned long m28 = encode_FA500(transmitter, channel - 'A' + 1, command ? 2 : 0, 0, rolling);
+			unsigned long m28 = encode_FA500(transmitter, channel - 'A' + 1, command ? 2 : 0, 0, r);
 			unsigned long m32 = encode_FA500(transmitter, channel - 'A' + 1, command, 0, 0);
 			unsigned long c28 = encrypt(m28);
 #ifdef DEBUG
