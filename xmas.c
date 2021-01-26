@@ -83,10 +83,10 @@ static void process(struct tm *now, const timing_t *timing) {
 }
 
 int xmas_init() {
+	ZERO(channel_status);
 	if (pthread_create(&thread_xmas, NULL, &xmas, NULL)) {
 		syslog(LOG_WARNING, "Error creating thread");
 	}
-	ZERO(channel_status);
 	return 0;
 }
 

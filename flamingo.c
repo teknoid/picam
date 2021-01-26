@@ -424,21 +424,24 @@ static void send32_multibit(char *m, int r) {
 
 			// clock bit
 			digitalWrite(TX, 1);
-			_delay(T2H);
+			_delay(T3H);
 			digitalWrite(TX, 0);
-			_delay(T2L);
+			_delay(T3L);
 
 			// data bits
 			for (int j = 0; j < bits[i]; j++) {
 				digitalWrite(TX, 1);
-				_delay(T2H);
+				_delay(T3H);
 				digitalWrite(TX, 0);
-				_delay(T2L);
+				_delay(T3L);
 			}
 
 			// wait to next clock bit
-			_delay(T2X);
+			_delay(T3X);
 		}
+
+		// wait before sending next sync
+		_delay(4 * T3S);
 	}
 	usleep(REPEAT_PAUSE2);
 }
@@ -544,13 +547,14 @@ void flamingo_send_FA500(int remote, char channel, int command, int rolling) {
 	if (0 <= rolling && rolling <= 4) {
 
 		// send specified rolling code
-		unsigned long message = encode_FA500(transmitter, channel - 'A' + 1, command ? 2 : 0, 0, rolling);
-		unsigned long code = encrypt(message);
+		unsigned long m28 = encode_FA500(transmitter, channel - 'A' + 1, command ? 2 : 0, 0, rolling);
+		unsigned long m32 = encode_FA500(transmitter, channel - 'A' + 1, command, 0, 0);
+		unsigned long c28 = encrypt(m28);
 #ifdef DEBUG
 		printf("FA500 %d %c %d %d => 0x%08lx %s => 0x%08lx\n", remote, channel, command, rolling, message, printbits(message, SPACEMASK_FA500), code);
 #endif
-		send28(code, 4);
-		send32(message, 3);
+		send28(c28, 4);
+		send32(m32, 3);
 		send32_multibit(0, 3); // TODO
 		send24(0x00144114, 5); // TODO
 
@@ -559,13 +563,14 @@ void flamingo_send_FA500(int remote, char channel, int command, int rolling) {
 		// send all rolling codes in sequence
 		for (int r = 0; r < 4; r++) {
 
-			unsigned long message = encode_FA500(transmitter, channel - 'A' + 1, command ? 2 : 0, 0, r);
-			unsigned long code = encrypt(message);
+			unsigned long m28 = encode_FA500(transmitter, channel - 'A' + 1, command ? 2 : 0, 0, rolling);
+			unsigned long m32 = encode_FA500(transmitter, channel - 'A' + 1, command, 0, 0);
+			unsigned long c28 = encrypt(m28);
 #ifdef DEBUG
 			printf("FA500 %d %c %d %d => 0x%08lx %s => 0x%08lx\n", remote, channel, command, r, message, printbits(message, SPACEMASK_FA500), code);
 #endif
-			send28(code, 4);
-			send32(message, 3);
+			send28(c28, 4);
+			send32(m32, 3);
 			send32_multibit(0, 3); // TODO
 			send24(0x00144114, 5); // TODO
 			sleep(1);
