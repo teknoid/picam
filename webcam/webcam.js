@@ -1,3 +1,11 @@
+function high() {
+	window.location.href = "/webcam/h/webcam.html";
+}
+
+function low() {
+	window.location.href = "/webcam/l/webcam.html";
+}
+
 function live(res) {
 	var hours = document.querySelectorAll('#navigation-top > ul > li');
 	for (var i = 0; i < hours.length; i++) {
@@ -43,10 +51,6 @@ function updateImage() {
 }
 
 window.onload = function() {
-	if (location.href.endsWith("/webcam/")) {
-		location.href = "/webcam/h/";
-	}
-
 	setInterval(function() {
 		updateImage()
 	}, 10000);
