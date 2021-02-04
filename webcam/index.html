@@ -8,7 +8,8 @@
 	<link rel="shortcut icon" href="../favicon.ico" type="image/x-icon">
 	<script>
 		window.onload = function() {
-			if (location.href.endsWith("/webcam/")) {
+			var loc = location.href;
+			if (loc.endsWith("/webcam/") || loc.endsWith("/h/") || loc.endsWith("/l/")) {
 				location.href = "/webcam/h/webcam.html";
 			}
 		}
