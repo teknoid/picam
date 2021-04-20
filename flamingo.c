@@ -44,7 +44,7 @@
 #include "flamingo.h"
 #include "utils.h"
 
-// #define DEBUG
+#define DEBUG
 
 // global variables used in GPIO interrupt handler
 static unsigned long code, pulse;
@@ -551,7 +551,7 @@ void flamingo_send_FA500(int remote, char channel, int command, int rolling) {
 		unsigned long m32 = encode_FA500(transmitter, channel - 'A' + 1, command, 0, 0);
 		unsigned long c28 = encrypt(m28);
 #ifdef DEBUG
-		printf("FA500 %d %c %d %d => 0x%08lx %s => 0x%08lx\n", remote, channel, command, rolling, message, printbits(message, SPACEMASK_FA500), code);
+		printf("FA500 %d %c %d %d => 0x%08lx %s => 0x%08lx\n", remote, channel, command, rolling, m28, printbits(m28, SPACEMASK_FA500), c28);
 #endif
 		send28(c28, 4);
 		send32(m32, 3);
@@ -567,7 +567,7 @@ void flamingo_send_FA500(int remote, char channel, int command, int rolling) {
 			unsigned long m32 = encode_FA500(transmitter, channel - 'A' + 1, command, 0, 0);
 			unsigned long c28 = encrypt(m28);
 #ifdef DEBUG
-			printf("FA500 %d %c %d %d => 0x%08lx %s => 0x%08lx\n", remote, channel, command, r, message, printbits(message, SPACEMASK_FA500), code);
+			printf("FA500 %d %c %d %d => 0x%08lx %s => 0x%08lx\n", remote, channel, command, r, m28, printbits(m28, SPACEMASK_FA500), c28);
 #endif
 			send28(c28, 4);
 			send32(m32, 3);
