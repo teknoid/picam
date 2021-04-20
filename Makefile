@@ -5,7 +5,7 @@ LIBS = -lpthread -lwiringPi -lrt
 SRCS = $(wildcard *.c)
 OBJS = $(SRCS:.c=.o)
 
-all: mcp flamingoread flamingosend flamingo-test mcp3204-test
+all: mcp flamingoread flamingosend flamingo-test mcp3204-test rfsniffer
 
 mcp: mcp.o utils.o xmas.o mcp3204.o webcam.o flamingo.o
 	$(CC) $(CFLAGS) $(LIBS) -o mcp mcp.o utils.o xmas.o mcp3204.o webcam.o flamingo.o
@@ -22,13 +22,16 @@ flamingo-test: flamingo-test.o flamingo.o utils.o
 mcp3204-test: mcp3204-test.o mcp3204.o utils.o 
 	$(CC) $(CFLAGS) $(LIBS) -o mcp3204-test mcp3204-test.o mcp3204.o utils.o 
 
+rfsniffer: rfsniffer.o flamingo.o utils.o 
+	$(CC) $(CFLAGS) $(LIBS) -o rfsniffer rfsniffer.o flamingo.o utils.o 
+
 .c.o:
 	$(CC) -c $(CFLAGS) $< 
 
 .PHONY: clean install install-service
 
 clean:
-	rm -f *.o *-test mcp flamingoread flamingosend
+	rm -f *.o *-test mcp flamingoread flamingosend rfsniffer
 
 install:
 	@echo "[Installing and starting mcp]"
@@ -38,6 +41,7 @@ install:
 	install -m 0755 flamingosend /usr/local/bin
 	install -m 0755 flamingo-test /usr/local/bin
 	install -m 0755 mcp3204-test /usr/local/bin
+	install -m 0755 rfsniffer /usr/local/bin
 	systemctl start mcp
 
 install-service:

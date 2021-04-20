@@ -4,4 +4,6 @@
 
 #define msleep(x) usleep(x*1000)
 
+char *printbits64(unsigned long long code, unsigned long long spacemask);
+
 char *printbits(unsigned long code, unsigned long spacemask);
