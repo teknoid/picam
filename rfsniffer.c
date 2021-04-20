@@ -50,15 +50,16 @@ static void isr() {
 	tLast.tv_sec = tNow.tv_sec;
 	tLast.tv_usec = tNow.tv_usec;
 
-	// ignore noise
-	if (isr_pulse < 100)
+	// ignore noise & crap
+	if (isr_pulse < 111 || isr_pulse > 22222)
 		return;
 
 	// error detection
 	if (--isr_kill == 0) {
-		printf("decoding %d aborted\n", isr_pattern);
+		printf("sampling %d aborted\n", isr_pattern);
 		isr_bits = 0;
 		isr_pattern = 0;
+		return;
 	}
 
 	switch (isr_pattern) {
@@ -117,13 +118,33 @@ static void isr() {
 		}
 		break;
 
+	case 99: // ??? test ???
+		if (isr_bits) {
+			isr_code += isr_pulse < 750 ? 0 : 1;
+
+//			if (isr_state)
+//				printf("L%04lu ", isr_pulse);
+//			else
+//				printf("H%04lu ", isr_pulse);
+
+			if (--isr_bits == 0) {
+				isr_code_buffer[isr_index++] = isr_code;
+				isr_pattern = 0;
+//				printf("\n");
+			} else {
+				isr_code <<= 1;
+			}
+		}
+		break;
+
 	default: // detect SYNC sequences and start pattern sampling
 		isr_code = 0;
 		isr_kill = MAX_EDGES + 1;
 
 		if (isr_state == 1) {
 			// LOW sync pulses
-			if (3850 < isr_pulse && isr_pulse < 4050) {
+			if (3850 < isr_pulse && isr_pulse < 4000) {
+				// not a real sync - it's the pause between 1st and 2nd message
 				isr_bits = 36;
 				isr_pattern = 1;
 				isr_pattern_buffer[isr_index] = isr_pattern;
@@ -146,6 +167,12 @@ static void isr() {
 			}
 		} else {
 			// HIGH sync pulses
+			if (800 < isr_pulse && isr_pulse < 900) {
+				isr_bits = 32;
+				isr_pattern = 99;
+				isr_pattern_buffer[isr_index] = isr_pattern;
+				isr_sync_buffer[isr_index] = isr_pulse;
+			}
 		}
 	}
 }
@@ -181,27 +208,30 @@ static unsigned long decode_0110(unsigned long long in) {
 static void decode_nexus(unsigned char i) {
 	unsigned long long code = isr_code_buffer[i];
 	unsigned long sync = isr_sync_buffer[i];
-	printf("NEXUS sync %lu 0x%0llx", sync, code);
+	printf("NEXUS sync %lu 0x%08llx", sync, code);
 
-	unsigned char id, battery, channel, humidity;
-	int temp;
-	humidity = code & 0xff;
+	if ((code & 0x0f00) != 0x0f00) {
+		printf(" message verification failed\n");
+		return;
+	}
+	// https://github.com/merbanan/rtl_433/blob/master/src/devices/nexus.c
+	unsigned char humidity = code & 0xff;
 	code >>= 8; // humidity
-	code >>= 4; // const
-	temp = (int) code & 0x0fff;
+	code >>= 4; // const always 1111 - used for message verification
+	int temp = (int) code & 0x0fff;
 	code >>= 12; // temp
-	channel = code & 0x07;
-	code >>= 3; // channel
-	battery = code & 0x01;
-	code >>= 1; // battery
-	id = code & 0xff;
+	unsigned char channel = code & 0x07;
+	code >>= 3;
+	unsigned char battery = code & 0x01;
+	code >>= 1;
+	unsigned char id = code & 0xff;
 	printf(" :: Id = %d, Channel = %d, Battery = %d, Temperature = %02.1fC, Humidity = %d%%\n", id, channel, battery, ((float) temp * 0.1), humidity);
 }
 
 static void decode_flamingo28(unsigned char i) {
 	unsigned long code = (unsigned long) isr_code_buffer[i];
 	unsigned long sync = isr_sync_buffer[i];
-	printf("FLAMINGO28 sync %lu 0x%0lx", sync, code);
+	printf("FLAMINGO28 sync %lu 0x%04lx", sync, code);
 
 	unsigned long message;
 	unsigned int xmitter;
@@ -215,7 +245,7 @@ static void decode_flamingo28(unsigned char i) {
 static void decode_flamingo24(unsigned char i) {
 	unsigned long code = (unsigned long) isr_code_buffer[i];
 	unsigned long sync = isr_sync_buffer[i];
-	printf("FLAMINGO24 sync %lu 0x%0lx", sync, code);
+	printf("FLAMINGO24 sync %lu 0x%04lx", sync, code);
 	printf(" %s\n", printbits(code, 0x01010101));
 	// TODO decode
 }
@@ -223,7 +253,7 @@ static void decode_flamingo24(unsigned char i) {
 static void decode_flamingo32(unsigned char i) {
 	unsigned long long code_raw = isr_code_buffer[i];
 	unsigned long sync = isr_sync_buffer[i];
-	printf("FLAMINGO32 sync %lu 0x%0llx", sync, code_raw);
+	printf("FLAMINGO32 sync %lu 0x%08llx", sync, code_raw);
 
 	// decode code_raw into 01=0 and 10=1
 	unsigned long code = decode_0110(code_raw);
@@ -244,6 +274,13 @@ static void decode_flamingo32(unsigned char i) {
 	printf(" :: Transmitter-Id = 0x%x, channel = %d, command = %d, payload = 0x%02x, \n", xmitter, channel, command, payload);
 }
 
+static void decode_test(unsigned char i) {
+	unsigned long long code_raw = isr_code_buffer[i];
+	unsigned long sync = isr_sync_buffer[i];
+	printf("TEST sync %04lu 0x%08llx", sync, code_raw);
+	printf(" %s\n", printbits64(code_raw, 0x0101010101010101));
+}
+
 static void decode(unsigned char index) {
 	unsigned char pattern = isr_pattern_buffer[index];
 	switch (pattern) {
@@ -255,6 +292,8 @@ static void decode(unsigned char index) {
 		return decode_flamingo24(index);
 	case 4:
 		return decode_flamingo32(index);
+	case 99:
+		return decode_test(index);
 	default:
 		printf("no decoder configured for pattern %d sync %lu 0x%0llx\n", pattern, isr_sync_buffer[index], isr_code_buffer[index]);
 	}
@@ -262,7 +301,7 @@ static void decode(unsigned char index) {
 
 int main(int argc, char **argv) {
 	// test
-	printf("%s\n", printbits64(0xdeadbeefdeadbeef, 0x0101010101010101));
+	printf("test 2x 0xdeadbeef = %s\n", printbits64(0xdeadbeefdeadbeef, 0x0101010101010101));
 
 	// Set our thread to MAX priority
 	struct sched_param sp;
@@ -322,7 +361,7 @@ static void* decoder(void *arg) {
 
 	unsigned char decoder_index = 0;
 	while (1) {
-		sleep(1);
+		sleep(2);
 
 		if (decoder_index == isr_index)
 			continue; // nothing received
