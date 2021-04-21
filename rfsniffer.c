@@ -366,16 +366,17 @@ static void* decoder(void *arg) {
 		if (decoder_index == isr_index)
 			continue; // nothing received
 
-		int todo = (isr_index > decoder_index) ? (isr_index - decoder_index) : (decoder_index - isr_index);
-		printf("DECODER [%d/%d] processing %i codes\n", decoder_index, isr_index, todo);
+		int todo = (isr_index > decoder_index) ? (isr_index - decoder_index) : ((BUFFER - decoder_index) + isr_index);
+		printf("DECODER [%d/%d] processing %i %s\n", decoder_index, isr_index, todo, todo == 1 ? "code" : "codes");
 
+		// process till overflow
 		if (decoder_index > isr_index)
 			while (decoder_index > isr_index)
 				decode(decoder_index++);
 
-		else
-			while (decoder_index < isr_index)
-				decode(decoder_index++);
+		// follow isr_index
+		while (decoder_index < isr_index)
+			decode(decoder_index++);
 
 	}
 
