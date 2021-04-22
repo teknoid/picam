@@ -25,6 +25,9 @@ mcp3204-test: mcp3204-test.o mcp3204.o utils.o
 rfsniffer: rfsniffer.o flamingo.o utils.o
 	$(CC) $(CFLAGS) $(LIBS) -o rfsniffer rfsniffer.o flamingo.o utils.o -lbcm2835
 
+rfsniffer-wiringpi: rfsniffer-wiringpi.o flamingo.o utils.o
+	$(CC) $(CFLAGS) $(LIBS) -o rfsniffer-wiringpi rfsniffer-wiringpi.o flamingo.o utils.o
+
 .c.o:
 	$(CC) -c $(CFLAGS) $< 
 

@@ -220,6 +220,10 @@ static void decode_test(unsigned char i) {
 }
 
 static void decode(unsigned char index) {
+	unsigned long long code_raw = code_buffer[index];
+	if (!code_raw)
+		return;
+
 	unsigned char pattern = pattern_buffer[index];
 	switch (pattern) {
 	case 1:
@@ -256,11 +260,15 @@ static void* sampler(void *arg) {
 		return (void *) 0;
 	}
 
-	// gpio pin setup
-	bcm2835_gpio_fsel(GPIO_PIN, BCM2835_GPIO_FSEL_INPT);
-	bcm2835_gpio_set_pud(GPIO_PIN, BCM2835_GPIO_PUD_UP);
-	bcm2835_gpio_fen(GPIO_PIN);
-	bcm2835_gpio_ren(GPIO_PIN);
+	// gpio pin setup (not working - use wiringpi gpio program)
+//	bcm2835_gpio_fsel(GPIO_PIN, BCM2835_GPIO_FSEL_INPT);
+//	bcm2835_gpio_set_pud(GPIO_PIN, BCM2835_GPIO_PUD_UP);
+//	bcm2835_gpio_fen(GPIO_PIN);
+//	bcm2835_gpio_ren(GPIO_PIN);
+
+	char command[BUFFER];
+	sprintf(command, "/usr/bin/gpio edge %d both", GPIO_PIN);
+	system(command);
 
 	// poll setup
 	char buf[32];
@@ -328,7 +336,7 @@ static void* sampler(void *arg) {
 
 			if (state) {
 				// LOW sync pulses
-				if (3850 < pulse && pulse < 4000) {
+				if (3800 < pulse && pulse < 3999) {
 					// not a real sync - it's the pause between 1st and 2nd message
 					bits = 36;
 					mode = 1;
