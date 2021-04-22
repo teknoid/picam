@@ -29,20 +29,27 @@
 
 #define GPIO_PIN	27	//RPi2 Pin13 GPIO_GEN2
 
-#define BUFFER		255
+#define BUFFER		256
 #define MAX_EDGES	128 // max 64 bit code = 128 high/low edges
 
 // ring buffers
+static unsigned char sampler_index, decoder_index = 0;
 static unsigned char pattern_buffer[BUFFER];
 static unsigned long sync_buffer[BUFFER];
 static unsigned long long code_buffer[BUFFER];
-static unsigned char sampler_index, decoder_index = 0;
+
+// pulse counters: index equals pulse length, e.g. 100µs=1, 200µs=2, etc
+static unsigned long lpulse_counter[BUFFER * BUFFER];
+static unsigned long hpulse_counter[BUFFER * BUFFER];
+static unsigned char pulse_counter_active = 0;
 
 static pthread_t thread_decoder;
 static void* decoder(void *arg);
 
 static pthread_t thread_sampler;
 static void* sampler(void *arg);
+
+static unsigned char decoder_delay = 3; // standard: 3 seconds
 
 // Ideen
 
@@ -265,8 +272,20 @@ static void* sampler(void *arg) {
 
 	struct timeval tNow, tLast;
 	unsigned long long code;
-	unsigned long pulse;
-	unsigned char pattern, bits, state, kill, dummy;
+	unsigned long pulse, p1, p2;
+	unsigned int pulse_centi;
+	unsigned char mode, bits, state, kill, dummy;
+
+	mode = 0;							// normal mode: search SYN pulses
+//	mode = 255;							// counter mode: sample both HIGH/LOW pulses and count them
+
+	if (mode == 255) {
+		decoder_delay = 5; 				// to get more samples
+		pulse_counter_active = 1; 		// print counters
+	}
+
+	// initialize tLast for correct 1st pulse calculation
+	gettimeofday(&tLast, NULL);
 
 	while (1) {
 		// wait for interrupt
@@ -285,19 +304,56 @@ static void* sampler(void *arg) {
 		lseek(fdset[0].fd, 0, SEEK_SET);
 		read(fdset[0].fd, &dummy, 1);
 
-		// ignore noise & crap
-		if (pulse < 222 || pulse > 22222)
-			continue;
+		// in counter mode we want all pulses
+		if (mode != 255) {
 
-		// error detection
-		if (--kill == 0) {
-			printf("sampling %d aborted\n", pattern);
-			bits = 0;
-			pattern = 0;
-			continue;
+			// ignore noise & crap
+			if (pulse < 222 || pulse > 22222)
+				continue;
+
+			// error detection
+			if (--kill == 0) {
+				printf("sampling %d aborted\n", mode);
+				bits = 0;
+				mode = 0;
+				continue;
+			}
 		}
 
-		switch (pattern) {
+		switch (mode) {
+
+		case 0: // detect SYNC sequences and start sampling
+			code = 0;
+			kill = MAX_EDGES + 1;
+
+			if (state) {
+				// LOW sync pulses
+				if (3850 < pulse && pulse < 4000) {
+					// not a real sync - it's the pause between 1st and 2nd message
+					bits = 36;
+					mode = 1;
+					pattern_buffer[sampler_index] = mode;
+					sync_buffer[sampler_index] = pulse;
+				} else if (T1SMIN < pulse && pulse < T1SMAX) {
+					bits = 28;
+					mode = 2;
+					pattern_buffer[sampler_index] = mode;
+					sync_buffer[sampler_index] = pulse;
+				} else if (T4SMIN < pulse && pulse < T4SMAX) {
+					bits = 24;
+					mode = 3;
+					pattern_buffer[sampler_index] = mode;
+					sync_buffer[sampler_index] = pulse;
+				} else if (T2S1MIN < pulse && pulse < T2S1MAX) {
+					bits = 64;
+					mode = 4;
+					pattern_buffer[sampler_index] = mode;
+					sync_buffer[sampler_index] = pulse;
+				}
+			} else {
+				// HIGH sync pulses
+			}
+			break;
 
 		case 1: // nexus - sample LOW pulses
 			if (bits && state) {
@@ -306,7 +362,7 @@ static void* sampler(void *arg) {
 
 				if (--bits == 0) {
 					code_buffer[sampler_index++] = code;
-					pattern = 0;
+					mode = 0;
 				} else {
 					code <<= 1;
 				}
@@ -320,7 +376,7 @@ static void* sampler(void *arg) {
 
 				if (--bits == 0) {
 					code_buffer[sampler_index++] = code;
-					pattern = 0;
+					mode = 0;
 				} else {
 					code <<= 1;
 				}
@@ -334,7 +390,7 @@ static void* sampler(void *arg) {
 
 				if (--bits == 0) {
 					code_buffer[sampler_index++] = code;
-					pattern = 0;
+					mode = 0;
 				} else {
 					code <<= 1;
 				}
@@ -346,25 +402,30 @@ static void* sampler(void *arg) {
 				code += pulse < T2Y ? 0 : 1;
 				if (--bits == 0) {
 					code_buffer[sampler_index++] = code;
-					pattern = 0;
+					mode = 0;
 				} else {
 					code <<= 1;
 				}
 			}
 			break;
 
-		case 99: // ??? test - sample both HIGH/LOW pulses
+		case 254: // analyzer mode
+			// round pulse length to multiples of 100 and cut last 2 digits
+			p1 = pulse % 100;
+			p2 = p1 >= 50 ? (pulse - p1 + 100) : (pulse - p1);
+			pulse_centi = p2 / 100;
 			if (bits) {
-				code += pulse < 750 ? 0 : 1;
+				code += pulse < 1500 ? 0 : 1;
 
+				// print
 				if (state)
-					printf("L%04lu ", pulse);
+					printf("L%02d ", pulse_centi);
 				else
-					printf("H%04lu ", pulse);
+					printf("H%02d ", pulse_centi);
 
 				if (--bits == 0) {
 					code_buffer[sampler_index++] = code;
-					pattern = 0;
+					mode = 0;
 					printf("\n");
 				} else {
 					code <<= 1;
@@ -372,43 +433,24 @@ static void* sampler(void *arg) {
 			}
 			break;
 
-		default: // detect SYNC sequences and start pattern sampling
-			code = 0;
-			kill = MAX_EDGES + 1;
-
-			if (state == 1) {
-				// LOW sync pulses
-				if (3850 < pulse && pulse < 4000) {
-					// not a real sync - it's the pause between 1st and 2nd message
-					bits = 36;
-					pattern = 1;
-					pattern_buffer[sampler_index] = pattern;
-					sync_buffer[sampler_index] = pulse;
-				} else if (T1SMIN < pulse && pulse < T1SMAX) {
-					bits = 28;
-					pattern = 2;
-					pattern_buffer[sampler_index] = pattern;
-					sync_buffer[sampler_index] = pulse;
-				} else if (T4SMIN < pulse && pulse < T4SMAX) {
-					bits = 24;
-					pattern = 3;
-					pattern_buffer[sampler_index] = pattern;
-					sync_buffer[sampler_index] = pulse;
-				} else if (T2S1MIN < pulse && pulse < T2S1MAX) {
-					bits = 64;
-					pattern = 4;
-					pattern_buffer[sampler_index] = pattern;
-					sync_buffer[sampler_index] = pulse;
-				}
+		case 255: // counter mode
+			// round pulse length to multiples of 100 and used it as index for counters
+			p1 = pulse % 100;
+			p2 = p1 >= 50 ? (pulse - p1 + 100) : (pulse - p1);
+			pulse_centi = p2 / 100;
+			// update pulse counters
+			if (pulse_centi > (BUFFER * BUFFER)) {
+				printf("warning: pulse_centi overflow %d\n", pulse_centi);
 			} else {
-				// HIGH sync pulses
-				if (850 < pulse && pulse < 1000) {
-					bits = 32;
-					pattern = 99;
-					pattern_buffer[sampler_index] = pattern;
-					sync_buffer[sampler_index] = pulse;
-				}
+				if (state)
+					lpulse_counter[pulse_centi]++;
+				else
+					hpulse_counter[pulse_centi]++;
 			}
+			break;
+
+		default:
+			printf("no mode %d not defined\n", mode);
 		}
 	}
 
@@ -421,8 +463,56 @@ static void* decoder(void *arg) {
 		return (void *) 0;
 	}
 
+	unsigned long maxh, maxl;
+	unsigned char maxhi, maxli;
+
 	while (1) {
-		sleep(2);
+		sleep(decoder_delay);
+
+		// print pulse counters and top ten pulse lengths, then clear counters
+		if (pulse_counter_active) {
+			printf("\nPulse counters of last %d seconds (H006 0327 means 327 HIGH pulses of 600µs, L019 0149 means 149 LOW pulses of 1900µs)\n", decoder_delay);
+			printf("\n");
+			for (int i = 0; i < 100; i++) {
+				printf("L%02d  ", i);
+			}
+			printf("\n");
+			for (int i = 0; i < 100; i++) {
+				printf("%04lu ", lpulse_counter[i]);
+			}
+			printf("\n\n");
+			for (int i = 0; i < 100; i++) {
+				printf("H%02d  ", i);
+			}
+			printf("\n");
+			for (int i = 0; i < 100; i++) {
+				printf("%04lu ", hpulse_counter[i]);
+			}
+			printf("\n\nTop Ten (without noise)\n");
+			lpulse_counter[0] = hpulse_counter[0] = 0;	// ignore pulses below 100µs
+			lpulse_counter[1] = hpulse_counter[1] = 0;	// ignore pulses below 200µs
+			hpulse_counter[2] = 0; 						// ignore HIGH pulses below 300µs
+			for (int m = 0; m < 10; m++) {
+				maxh = maxl = maxhi = maxli = 0;
+				for (int i = 0; i < BUFFER; i++) {
+					if (lpulse_counter[i] > maxl) {
+						maxl = lpulse_counter[i];
+						maxli = i;
+					}
+					if (hpulse_counter[i] > maxh) {
+						maxh = hpulse_counter[i];
+						maxhi = i;
+					}
+				}
+				printf("L%03d %04lu   H%03d %04lu\n", maxli, maxl, maxhi, maxh);
+				lpulse_counter[maxli] = 0;
+				hpulse_counter[maxhi] = 0;
+			}
+			for (int i = 0; i < 100; i++) {
+				lpulse_counter[i] = 0;
+				hpulse_counter[i] = 0;
+			}
+		}
 
 		if (decoder_index == sampler_index)
 			continue; // nothing received
