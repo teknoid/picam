@@ -1,49 +1,45 @@
-CFLAGS = -Wall
+CFLAGS = -Wall -Wno-unused-function
+LFLAGS = -Wall
 
-LIBS = -lpthread -lwiringPi -lrt
+LIBS = -lpthread -lwiringPi -lrt -lbcm2835
 
 SRCS = $(wildcard *.c)
 OBJS = $(SRCS:.c=.o)
 
-all: mcp flamingoread flamingosend flamingo-test mcp3204-test rfsniffer
+all: clean mcp flamingo mcp3204 rfsniffer
 
-mcp: mcp.o utils.o xmas.o mcp3204.o webcam.o flamingo.o
-	$(CC) $(CFLAGS) $(LIBS) -o mcp mcp.o utils.o xmas.o mcp3204.o webcam.o flamingo.o
+mcp: mcp.o utils.o xmas.o mcp3204.o webcam.o flamingo.o rfsniffer.o frozen.o
+	$(CC) $(CFLAGS) -o mcp mcp.o utils.o xmas.o mcp3204.o webcam.o flamingo.o rfsniffer.o frozen.o $(LIBS)
 
-flamingoread: flamingo.o flamingoread.o utils.o 
-	$(CC) $(CFLAGS) $(LIBS) -o flamingoread flamingoread.o flamingo.o utils.o 
+flamingo: flamingo.o utils.o 
+	$(CC) $(CFLAGS) -DFLAMINGO_MAIN -c flamingo.c
+	$(CC) $(LFLAGS) -o flamingo flamingo.o utils.o $(LIBS)
 
-flamingosend: flamingo.o flamingosend.o utils.o 
-	$(CC) $(CFLAGS) $(LIBS) -o flamingosend flamingosend.o flamingo.o utils.o 
-
-flamingo-test: flamingo-test.o flamingo.o utils.o
-	$(CC) $(CFLAGS) $(LIBS) -o flamingo-test flamingo-test.o flamingo.o utils.o
-
-mcp3204-test: mcp3204-test.o mcp3204.o utils.o 
-	$(CC) $(CFLAGS) $(LIBS) -o mcp3204-test mcp3204-test.o mcp3204.o utils.o 
+mcp3204: mcp3204.o utils.o
+	$(CC) $(CFLAGS) -DMCP3204_MAIN -c mcp3204.c
+	$(CC) $(LFLAGS) -o mcp3204 mcp3204.o utils.o $(LIBS)
 
 rfsniffer: rfsniffer.o flamingo.o utils.o frozen.o
-	$(CC) $(CFLAGS) $(LIBS) -o rfsniffer rfsniffer.o flamingo.o utils.o frozen.o -lbcm2835
+	$(CC) $(CFLAGS) -DRFSNIFFER_MAIN -c rfsniffer.c flamingo.c
+	$(CC) $(LFLAGS) -o rfsniffer rfsniffer.o flamingo.o utils.o frozen.o $(LIBS)
 
-rfsniffer-wiringpi: rfsniffer-wiringpi.o flamingo.o utils.o
-	$(CC) $(CFLAGS) $(LIBS) -o rfsniffer-wiringpi rfsniffer-wiringpi.o flamingo.o utils.o
+#rfsniffer-wiringpi: rfsniffer-wiringpi.o flamingo.o utils.o
+#	$(CC) $(CFLAGS) $(LIBS) -o rfsniffer-wiringpi rfsniffer-wiringpi.o flamingo.o utils.o
 
 .c.o:
-	$(CC) -c $(CFLAGS) $< 
+	$(CC) -c $(CFLAGS) $<
 
-.PHONY: clean install install-service
+.PHONY: clean install install-service install-webcam
 
 clean:
-	rm -f *.o *-test mcp flamingoread flamingosend rfsniffer
+	rm -f *.o mcp mcp3204 flamingo rfsniffer
 
 install:
 	@echo "[Installing and starting mcp]"
 	systemctl stop mcp
 	install -m 0755 mcp /usr/local/bin
-	install -m 0755 flamingoread /usr/local/bin
-	install -m 0755 flamingosend /usr/local/bin
-	install -m 0755 flamingo-test /usr/local/bin
-	install -m 0755 mcp3204-test /usr/local/bin
+	install -m 0755 flamingo /usr/local/bin
+	install -m 0755 mcp3204 /usr/local/bin
 	install -m 0755 rfsniffer /usr/local/bin
 	systemctl start mcp
 

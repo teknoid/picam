@@ -30,12 +30,14 @@
  * XXXXXXXXXXXXXXXX 00000000 0000 0000	transmitter id
  *
  */
-
+#include <ctype.h>
 #include <pthread.h>
 #include <sched.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 #include <sys/mman.h>
 #include <sys/time.h>
 
@@ -44,7 +46,7 @@
 #include "flamingo.h"
 #include "utils.h"
 
-#define DEBUG
+// #define FLAMINGO_MAIN
 
 // global variables used in GPIO interrupt handler
 static unsigned long code, pulse;
@@ -52,11 +54,216 @@ static unsigned char bits, state, clockbit, databits, decryption;
 static struct timeval tNow, tLong, tLast, tEnd;
 
 static pthread_t thread_flamingo;
-
 static void* flamingo(void *arg);
 
-int flamingoread_pattern;
 flamingo_handler_t flamingoread_handler;
+static int flamingoread_pattern;
+
+static int usage() {
+	printf("Usage: flamingo -t | -12345 | <remote> <channel> <command> [rolling]\n");
+	printf("  RECEIVE and TEST mode\n");
+	printf("    -t ... execute unit test functions\n");
+	printf("    -v ... verbose output\n");
+	printf("    -1 ... detect 28bit rolling codes, rc1 pattern\n");
+	printf("    -2 ... detect 32bit messages, rc2 pattern\n");
+	printf("    -3 ... detect 32bit multibit messages, rc3 pattern (encoding still unknown)\n");
+	printf("    -4 ... detect 24bit messages, rc4 pattern\n");
+	printf("    -5 ... detect 32bit messages, rc2 pattern SF-500R message coding\n");
+	printf("  SEND mode\n");
+	printf("    <remote>  1, 2, 3, ...\n");
+	printf("    <channel> A, B, C, D\n");
+	printf("    <command> 0 - off, 1 - on\n");
+	printf("    [rolling]  rolling code index, 0...3\n");
+	return EXIT_FAILURE;
+}
+
+static void flamingoread_default_handler(unsigned int xmitter, unsigned char channel, unsigned char command, unsigned char payload) {
+	printf("received Transmitter-Id = 0x%x, channel = %d, command = %d, payload = 0x%02x\n", xmitter, channel, command, payload);
+}
+
+static void flamingo_test_general(unsigned int xmitter) {
+	unsigned long code, message, msg1, msg2;
+	unsigned char channel, command, payload, rolling;
+
+	printf("\n*** test message encoding & decoding ***\n");
+	message = encode_FA500(xmitter, 2, 1, 0x05, 0);
+	code = encrypt(message);
+	printf("encrypt %s => 0x%08lx => 0x%08lx\n", printbits(message, SPACEMASK_FA500), message, code);
+	message = decrypt(code);
+	decode_FA500(message, &xmitter, &channel, &command, &payload, &rolling);
+	printf("decrypt %s <= 0x%08lx <= 0x%08lx\n", printbits(message, SPACEMASK_FA500), message, code);
+	printf("  xmitter = 0x%x\n  channel = %d\n  command = %d\n  payload = 0x%02x\n", xmitter, channel, command, payload);
+
+	printf("\n*** test rolling code encryption & decryption ***\n");
+	for (int r = 0; r < 4; r++) {
+		msg1 = encode_FA500(xmitter, 2, 0, 0, r);
+		code = encrypt(msg1);
+		printf("encrypt %s => 0x%08lx => 0x%08lx\n", printbits(msg1, SPACEMASK_FA500), msg1, code);
+		msg2 = decrypt(code);
+		printf("decrypt %s <= 0x%08lx <= 0x%08lx\n", printbits(msg2, SPACEMASK_FA500), msg2, code);
+	}
+}
+
+static void flamingo_test_decrypt(unsigned long code) {
+	unsigned long message;
+	unsigned char channel, command, payload, rolling;
+	unsigned int xmitter;
+
+	printf("\n*** test decryption & decoding ***\n");
+	message = decrypt(code);
+	decode_FA500(message, &xmitter, &channel, &command, &payload, &rolling);
+	printf("decrypt %s <= 0x%08lx <= 0x%08lx\n", printbits(message, SPACEMASK_FA500), message, code);
+	printf("  xmitter = 0x%x\n  channel = %d\n  command = %d\n  payload = 0x%02x\n", xmitter, channel, command, payload);
+
+	// validate against defined transmitter id's
+	for (int i = 0; i < ARRAY_SIZE(REMOTES); i++) {
+		if (xmitter == REMOTES[i]) {
+			printf("  Transmitter valid, index=%d\n", i);
+		}
+	}
+}
+
+static void flamingo_test_brute_force(unsigned int xmitter, unsigned long c1, unsigned long c2, unsigned long c3, unsigned long c4) {
+	unsigned long code, message;
+
+	printf("\n*** test brute-force encryption ***\n");
+	for (int y = 0; y < 0x0F; y++) {
+		for (int x = 0; x < 0xFF; x++) {
+			message = y << 24 | xmitter << 8 | x;
+			code = encrypt(message);
+			if (code == c1 || code == c2 || code == c3 || code == c4) {
+				printf("%s => 0x%08lx => 0x%08lx\n", printbits(message, SPACEMASK_FA500), message, code);
+			}
+		}
+	}
+}
+
+static void flamingo_test_deadbeef() {
+	unsigned int transmitter;
+	unsigned long code, message;
+	unsigned char channel, command, payload, rolling;
+	unsigned long testcodes[3] = { 0x0000dead, 0x000beef0, 0x0affe000 };
+
+	printf("\n*** test dead+beef+affe ***\n");
+	for (int i = 0; i < ARRAY_SIZE(testcodes); i++) {
+		code = testcodes[i];
+		message = decrypt(code);
+		decode_FA500(message, &transmitter, &channel, &command, &payload, &rolling);
+		printf("decrypt %s <= 0x%08lx <= 0x%08lx\n", printbits(message, SPACEMASK_FA500), message, code);
+		message = encode_FA500(transmitter, channel, command, payload, rolling);
+		code = encrypt(message);
+		printf("encrypt %s => 0x%08lx => 0x%08lx\n", printbits(message, SPACEMASK_FA500), message, code);
+	}
+}
+
+static int flamingo_test(int argc, char *argv[]) {
+
+	// transmitter
+	flamingo_test_general(REMOTES[0]);
+
+	// code
+	flamingo_test_decrypt(0x0e5afff5);
+
+	// transmitter + 4x rolling codes (to see corresponding source messages)
+	flamingo_test_brute_force(REMOTES[0], 0x0e6bd68d, 0x0e7be29d, 0x0e70a7f5, 0x0e763e15);
+
+	// test deadbeef
+	flamingo_test_deadbeef();
+
+	// decrypt all codes from command line
+	if (argc > 1) {
+		for (int i = 1; i < argc; i++) {
+			unsigned long code = strtoul(argv[i], NULL, 0);
+			flamingo_test_decrypt(code);
+		}
+	}
+	return EXIT_SUCCESS;
+}
+
+static int flamingo_main(int argc, char **argv) {
+	if (argc < 1)
+		return usage();
+
+	if (argc >= 4) {
+
+		// SEND mode
+
+		// remote 1, 2, 3, ...
+		int remote = atoi(argv[1]);
+		if (remote < 1 || remote > sizeof(REMOTES)) {
+			printf("unknown remote %i\n", remote);
+			usage();
+			return EINVAL;
+		}
+
+		// channel A, B, C, D
+		char* c = argv[2];
+		char channel = toupper(c[0]);
+		if (channel < 'A' || channel > 'D') {
+			printf("channel not supported %c\n", channel);
+			usage();
+			return EINVAL;
+		}
+
+		// command 0 = off, 1 = on
+		int command = atoi(argv[3]);
+		if (!(command == 0 || command == 1)) {
+			printf("wrong command %i\n", command);
+			usage();
+			return EINVAL;
+		}
+
+		// optional: send rolling code index
+		int rolling = -1;
+		if (argv[4] != NULL) {
+			rolling = atoi(argv[4]);
+			if (rolling < 0 || rolling > 3) {
+				printf("wrong rolling code index %i\n", rolling);
+				usage();
+				return EINVAL;
+			}
+		}
+
+		// initialize without receive support
+		flamingo_init(0, 0);
+		flamingo_send_FA500(remote, channel, command, rolling);
+		return EXIT_SUCCESS;
+
+	} else {
+
+		// RECEIVE or TEST mode
+
+		int pattern;
+		int c = getopt(argc, argv, "t12345");
+		switch (c) {
+		case 't':
+			return flamingo_test(argc, argv);
+		case '1':
+			pattern = 1;
+			break;
+		case '2':
+			pattern = 2;
+			break;
+		case '3':
+			pattern = 3;
+			break;
+		case '4':
+			pattern = 4;
+			break;
+		case '5':
+			pattern = 5;
+			break;
+		default:
+			return usage();
+		}
+
+		// initialize with receive support: pattern to listen on and a handler routine
+		flamingo_init(pattern, &flamingoread_default_handler);
+		pause();
+		flamingo_close();
+		return EXIT_SUCCESS;
+	}
+}
 
 static void _delay(unsigned int millis) {
 	gettimeofday(&tNow, NULL);
@@ -90,7 +297,7 @@ static void isr28() {
 		code = code << 1;
 		code += pulse > T1X2 ? 1 : 0;
 		if (--bits == 0) {
-#ifdef DEBUG
+#ifdef FLAMINGO_MAIN
 			printf("0x%08lx\n", code);
 #endif
 		}
@@ -108,7 +315,7 @@ static void isr28() {
 		if (T1SMIN < pulse && pulse < T1SMAX) {
 			code = 0;
 			bits = 28;
-#ifdef DEBUG
+#ifdef FLAMINGO_MAIN
 			printf("28bit LOW sync %lu :: ", pulse);
 #endif
 		}
@@ -133,7 +340,7 @@ static void isr24() {
 		code = code << 1;
 		code += pulse > T1X2 ? 1 : 0;
 		if (--bits == 0) {
-#ifdef DEBUG
+#ifdef FLAMINGO_MAIN
 			printf("0x%08lx\n", code);
 #endif
 		}
@@ -151,7 +358,7 @@ static void isr24() {
 		if (T4SMIN < pulse && pulse < T4SMAX) {
 			code = 0;
 			bits = 24;
-#ifdef DEBUG
+#ifdef FLAMINGO_MAIN
 			printf("24bit LOW sync %lu :: ", pulse);
 #endif
 		}
@@ -192,7 +399,7 @@ static void isr32() {
 		// data pulse, check space between previous clock pulse: short=0 long=1
 		code += pulse < T2Y ? 0 : 1;
 		if (--bits == 0) {
-#ifdef DEBUG
+#ifdef FLAMINGO_MAIN
 			printf("0x%08lx\n", code);
 #endif
 		}
@@ -212,15 +419,15 @@ static void isr32() {
 			code = 0;
 			bits = 32;
 			clockbit = 0; // this is the first clock pulse
-#ifdef DEBUG
-			printf("32bit LOW sync %lu :: ", pulse);
+#ifdef FLAMINGO_MAIN
+					printf("32bit LOW sync %lu :: ", pulse);
 #endif
 		} else if (T2S2MIN < pulse && pulse < T2S2MAX) {
 			code = 0;
 			bits = 32;
 			clockbit = 0; // this is the first clock pulse
-#ifdef DEBUG
-			printf("32bit LOW sync %lu :: ", pulse);
+#ifdef FLAMINGO_MAIN
+					printf("32bit LOW sync %lu :: ", pulse);
 #endif
 		}
 	}
@@ -248,7 +455,7 @@ static void isr32_multibit() {
 		} else {
 			// next clock bit, store data bits
 			bits--;
-#ifdef DEBUG
+#ifdef FLAMINGO_MAIN
 			printf("%d", databits);
 			if (bits == 0) {
 				printf("\n");
@@ -270,7 +477,7 @@ static void isr32_multibit() {
 		if (T3SMIN < pulse && pulse < T3SMAX) {
 			code = 0;
 			bits = 32;
-#ifdef DEBUG
+#ifdef FLAMINGO_MAIN
 			printf("32bit LOW multibit sync %lu :: ", pulse);
 #endif
 		}
@@ -404,7 +611,7 @@ static void send32_multibit(char *m, int r) {
 		bits[i] = *c++ - '0';
 	}
 
-//#ifdef DEBUG
+//#ifdef FLAMINGO_MAIN
 //	printf("rc3 sending ");
 //	for (int i = 0; i < 32; i++) {
 //		printf("%d", bits[i]);
@@ -550,7 +757,7 @@ void flamingo_send_FA500(int remote, char channel, int command, int rolling) {
 		unsigned long m28 = encode_FA500(transmitter, channel - 'A' + 1, command ? 2 : 0, 0, rolling);
 		unsigned long m32 = encode_FA500(transmitter, channel - 'A' + 1, command, 0, 0);
 		unsigned long c28 = encrypt(m28);
-#ifdef DEBUG
+#ifdef FLAMINGO_MAIN
 		printf("FA500 %d %c %d %d => 0x%08lx %s => 0x%08lx\n", remote, channel, command, rolling, m28, printbits(m28, SPACEMASK_FA500), c28);
 #endif
 		send28(c28, 4);
@@ -566,7 +773,7 @@ void flamingo_send_FA500(int remote, char channel, int command, int rolling) {
 			unsigned long m28 = encode_FA500(transmitter, channel - 'A' + 1, command ? 2 : 0, 0, r);
 			unsigned long m32 = encode_FA500(transmitter, channel - 'A' + 1, command, 0, 0);
 			unsigned long c28 = encrypt(m28);
-#ifdef DEBUG
+#ifdef FLAMINGO_MAIN
 			printf("FA500 %d %c %d %d => 0x%08lx %s => 0x%08lx\n", remote, channel, command, r, m28, printbits(m28, SPACEMASK_FA500), c28);
 #endif
 			send28(c28, 4);
@@ -585,7 +792,7 @@ void flamingo_send_SF500(int remote, char channel, int command) {
 
 	unsigned int transmitter = REMOTES[remote - 1];
 	unsigned long message = encode_SF500(transmitter, channel - 'A' + 1, command, 0);
-#ifdef DEBUG
+#ifdef FLAMINGO_MAIN
 	printf("SF500 %d %d %d => 0x%08lx %s\n", remote, channel, command, message, printbits(message, SPACEMASK_SF500));
 #endif
 	send32(message, 5);
@@ -617,7 +824,7 @@ int flamingo_init(int pattern, flamingo_handler_t handler) {
 		decryption = 0;
 		state = digitalRead(RX);
 
-#ifdef DEBUG
+#ifdef FLAMINGO_MAIN
 		printf("pin state: %i\n", state);
 #endif
 
@@ -627,7 +834,7 @@ int flamingo_init(int pattern, flamingo_handler_t handler) {
 			if (wiringPiISR(RX, INT_EDGE_BOTH, &isr28) < 0) {
 				return -1;
 			}
-#ifdef DEBUG
+#ifdef FLAMINGO_MAIN
 			printf("listen to 28bit rc1 rolling codes...\n");
 #endif
 			break;
@@ -636,7 +843,7 @@ int flamingo_init(int pattern, flamingo_handler_t handler) {
 			if (wiringPiISR(RX, INT_EDGE_BOTH, &isr32) < 0) {
 				return -1;
 			}
-#ifdef DEBUG
+#ifdef FLAMINGO_MAIN
 			printf("listen to 32bit rc2 codes...\n");
 #endif
 			break;
@@ -645,7 +852,7 @@ int flamingo_init(int pattern, flamingo_handler_t handler) {
 			if (wiringPiISR(RX, INT_EDGE_BOTH, &isr32_multibit) < 0) {
 				return -1;
 			}
-#ifdef DEBUG
+#ifdef FLAMINGO_MAIN
 			printf("listen to 32bit rc3 multibit codes...\n");
 #endif
 			break;
@@ -654,7 +861,7 @@ int flamingo_init(int pattern, flamingo_handler_t handler) {
 			if (wiringPiISR(RX, INT_EDGE_BOTH, &isr24) < 0) {
 				return -1;
 			}
-#ifdef DEBUG
+#ifdef FLAMINGO_MAIN
 			printf("listen to 24bit rc4 codes...\n");
 #endif
 			break;
@@ -662,7 +869,7 @@ int flamingo_init(int pattern, flamingo_handler_t handler) {
 			if (wiringPiISR(RX, INT_EDGE_BOTH, &isr32) < 0) {
 				return -1;
 			}
-#ifdef DEBUG
+#ifdef FLAMINGO_MAIN
 			printf("listen to 32bit rc2 with SF-500R message coding...\n");
 #endif
 			break;
@@ -728,7 +935,7 @@ static void* flamingo(void *arg) {
 			decode_FA500(message, &xmitter, &channel, &command, &payload, &rolling);
 		}
 
-#ifdef DEBUG
+#ifdef FLAMINGO_MAIN
 		unsigned long spacemask = flamingoread_pattern == 5 ? SPACEMASK_FA500 : SPACEMASK_SF500;
 		printf("decrypt %s <= 0x%08lx <= 0x%08lx\n", printbits(message, spacemask), message, code);
 		printf("  xmitter = 0x%x\n  channel = %d\n  command = %d\n  payload = 0x%02x\n", xmitter, channel, command, payload);
@@ -747,3 +954,9 @@ static void* flamingo(void *arg) {
 
 	return (void *) 0;
 }
+
+#ifdef FLAMINGO_MAIN
+int main(int argc, char *argv[]) {
+	return flamingo_main(argc, argv);
+}
+#endif

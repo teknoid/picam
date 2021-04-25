@@ -15,6 +15,19 @@
 static pthread_mutex_t mcp3204_lock;
 static int spi_fd;
 
+static int mcp3204_main(int argc, char **argv) {
+	mcp3204_init();
+
+	int i = 100;
+	while (i-- > 0) {
+		uint16_t adc12bit = mcp3204_read();
+		uint16_t mVolt = mcp3204_millivolt(adc12bit);
+		printf("MCP3204: %d --> %dmV \n", adc12bit, mVolt);
+		sleep(1);
+	}
+	return 0;
+}
+
 static int spi_init() {
 	uint8_t mode = SPI_MODE_0;
 	uint8_t bits = SPI_BITS;
@@ -113,3 +126,9 @@ int mcp3204_init() {
 	}
 	return 0;
 }
+
+#ifdef MCP3204_MAIN
+int main(int argc, char **argv) {
+	return mcp3204_main(argc, argv);
+}
+#endif
