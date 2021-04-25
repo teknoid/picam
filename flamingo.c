@@ -188,6 +188,19 @@ static int flamingo_main(int argc, char **argv) {
 
 		// SEND mode
 
+		// Set our thread to MAX priority
+		struct sched_param sp;
+		memset(&sp, 0, sizeof(sp));
+		sp.sched_priority = sched_get_priority_max(SCHED_FIFO);
+		if (sched_setscheduler(0, SCHED_FIFO, &sp)) {
+			return -1;
+		}
+
+		// Lock memory to ensure no swapping is done
+		if (mlockall(MCL_FUTURE | MCL_CURRENT)) {
+			return -1;
+		}
+
 		// remote 1, 2, 3, ...
 		int remote = atoi(argv[1]);
 		if (remote < 1 || remote > sizeof(REMOTES)) {
