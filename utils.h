@@ -7,3 +7,5 @@
 char *printbits64(unsigned long long code, unsigned long long spacemask);
 
 char *printbits(unsigned long code, unsigned long spacemask);
+
+void create_sysfslike(char *dir, char *fname, char *fvalue, const char *fmt, ...);

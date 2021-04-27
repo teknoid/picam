@@ -57,6 +57,7 @@ static unsigned short hpulse_counter[PULSE_COUNTER_MAX];
 
 // default configuration
 static unsigned char verbose = 0;
+static unsigned char quiet = 0;
 static unsigned char analyzer_mode = 0;
 static unsigned char realtime_mode = 0;
 static unsigned char timestamp = 0;
@@ -73,6 +74,7 @@ static unsigned long sync_min = 1800;
 static unsigned long sync_max = 2000;
 static unsigned long bitdivider = 1500;
 static unsigned short noise = 100;
+static char *sysfslike = 0;
 
 static unsigned long timestamp_last_code;
 
@@ -99,10 +101,12 @@ static unsigned long timestamp_last_code;
 // - timestamp
 
 static int usage() {
-	printf("Usage: rfsniffer -v -j -c -nX -dX -a -r -bX -sX -SX -xX -yX -zX\n");
+	printf("Usage: rfsniffer -v -q -jX -fX -c -nX -dX -a -r -bX -sX -SX -xX -yX -zX\n");
 	printf("  void  normal mode, sync on known pulses, sample and decode messages\n");
-	printf("  -v    verbose output\n");
-	printf("  -j    print messages as JSON\n");
+	printf("  -v    verbose console output\n");
+	printf("  -q    no console output except errors\n");
+	printf("  -j X  create JSON file\n");
+	printf("  -f X  create sysfs-like entries in specified directory\n");
 	printf("  -t    add timestamp to messages\n");
 	printf("  -c    activate pulse length counter\n");
 	printf("  -n X  pulse length counter noise level (default 100µs)\n");
@@ -122,7 +126,7 @@ static int usage() {
 static int rfsniffer_main(int argc, char **argv) {
 	if (argc > 0) {
 		int c, i;
-		while ((c = getopt(argc, argv, "ab:cd:ejn:rs:S:tvx:y:z:")) != -1) {
+		while ((c = getopt(argc, argv, "ab:cd:ef:jn:qrs:S:tvx:y:z:")) != -1) {
 			switch (c) {
 			case 'a':
 				analyzer_mode = 1;
@@ -139,11 +143,17 @@ static int rfsniffer_main(int argc, char **argv) {
 			case 'e':
 				collect_identical_codes = 0;
 				break;
+			case 'f':
+				sysfslike = optarg;
+				break;
 			case 'j':
 				json = 1;
 				break;
 			case 'n':
 				noise = atoi(optarg);
+				break;
+			case 'q':
+				quiet = 1;
 				break;
 			case 'r':
 				realtime_mode = 1;
@@ -280,14 +290,28 @@ static void decode_nexus(unsigned long long raw, unsigned char repeat) {
 
 	// TODO timestamp via utils
 
+	// create strings
+	char craw[12], ctemp[6], chumi[3], cbatt[2];
+	snprintf(craw, 12, "0x%08llx", raw);
+	snprintf(ctemp, 6, "%02.1f", t);
+	snprintf(chumi, 3, "%u", h);
+	snprintf(cbatt, 2, "%u", b);
+
 	if (json) {
-		char format[BUFFER], craw[12], ctemp[6];
-		snprintf(craw, 12, "0x%08llx", raw);
-		snprintf(ctemp, 6, "%02.1f", t);
+		char format[BUFFER];
 		struct json_out jout = JSON_OUT_FILE(stdout);
 		snprintf(format, BUFFER, "%s", "{ %Q:%Q, %Q:%Q, %Q:%d, %Q:%d, %Q:%d, %Q:%d, %Q:%Q, %Q:%d }\n");
-		json_printf(&jout, format, "type", "NEXUS", "raw", craw, "repeat", repeat, "id", i, "channel", c, "battery", b, "temp", ctemp, "hum", h);
-	} else
+		json_printf(&jout, format, "type", "NEXUS", "raw", craw, "repeat", repeat, "id", i, "channel", c, "battery", b, "temp", ctemp, "humi", h);
+	}
+
+	if (sysfslike) {
+		// e.g. creates file entries like /tmp/NEXUS/231/0/temp
+		create_sysfslike(sysfslike, "temp", ctemp, "%s%d%d", "NEXUS", i, c);
+		create_sysfslike(sysfslike, "humi", chumi, "%s%d%d", "NEXUS", i, c);
+		create_sysfslike(sysfslike, "batt", cbatt, "%s%d%d", "NEXUS", i, c);
+	}
+
+	if (!quiet)
 		printf("NEXUS {%d} 0x%08llx Id = %d, Channel = %d, Battery = %s, Temp = %02.1fC, Hum = %d%%\n", repeat, raw, i, c, b ? "OK" : "LOW", t, h);
 }
 
@@ -504,7 +528,8 @@ static void dump_pulse_counters() {
 
 int rfsniffer_init() {
 #ifdef RFSNIFFER_MAIN
-	printf("INIT test 2x 0xdeadbeef = %s\n", printbits64(0xdeadbeefdeadbeef, 0x0101010101010101));
+	if (!quiet)
+		printf("INIT test 2x 0xdeadbeef = %s\n", printbits64(0xdeadbeefdeadbeef, 0x0101010101010101));
 #endif
 
 	if (!bcm2835_init())
@@ -515,13 +540,15 @@ int rfsniffer_init() {
 		sampler = &realtime_sampler;
 		decoder = &realtime_decoder;
 #ifdef RFSNIFFER_MAIN
-		printf("INIT using realtime_sampler and realtime_decoder\n");
+		if (!quiet)
+			printf("INIT using realtime_sampler and realtime_decoder\n");
 #endif
 	} else {
 		sampler = &stream_sampler;
 		decoder = &stream_decoder;
 #ifdef RFSNIFFER_MAIN
-		printf("INIT using stream_sampler and stream_decoder\n");
+		if (!quiet)
+			printf("INIT using stream_sampler and stream_decoder\n");
 #endif
 	}
 
@@ -531,7 +558,8 @@ int rfsniffer_init() {
 		return -1;
 	}
 #ifdef RFSNIFFER_MAIN
-	printf("INIT started decoder thread\n");
+	if (!quiet)
+		printf("INIT started decoder thread\n");
 #endif
 
 	// sampler thread
@@ -540,7 +568,8 @@ int rfsniffer_init() {
 		return -1;
 	}
 #ifdef RFSNIFFER_MAIN
-	printf("INIT started sampler thread\n");
+	if (!quiet)
+		printf("INIT started sampler thread\n");
 #endif
 
 	return 0;
@@ -574,7 +603,8 @@ static void* realtime_decoder(void *arg) {
 	}
 
 #ifdef RFSNIFFER_MAIN
-	printf("DECODER run every %d seconds, %s\n", decoder_delay, collect_identical_codes ? "collect identical codes" : "process each code separately");
+	if (!quiet)
+		printf("DECODER run every %d seconds, %s\n", decoder_delay, collect_identical_codes ? "collect identical codes" : "process each code separately");
 #endif
 
 	struct timeval tNow;
@@ -956,7 +986,8 @@ static void* stream_decoder(void *arg) {
 	}
 
 #ifdef RFSNIFFER_MAIN
-	printf("DECODER run every %d seconds, %s\n", decoder_delay, collect_identical_codes ? "collect identical codes" : "process each code separately");
+	if (!quiet)
+		printf("DECODER run every %d seconds, %s\n", decoder_delay, collect_identical_codes ? "collect identical codes" : "process each code separately");
 	unsigned short delta, stream_last;
 #endif
 
