@@ -44,9 +44,11 @@ static pthread_t thread_sampler;
 static void* realtime_sampler(void *arg);
 static void* stream_sampler(void *arg);
 
-// ring buffers + code matrix
+// ring buffers
 static unsigned short lstream[0xffff], hstream[0xffff];
 static unsigned short stream_write;
+
+// code matrix: x=pattern, y=code, y0 contains next free row
 static unsigned long long matrix[BUFFER][BUFFER];
 
 // pulse counters: index equals pulse length, e.g. 10µs=1, 20µs=2, etc
@@ -54,8 +56,10 @@ static unsigned short lpulse_counter[PULSE_COUNTER_MAX];
 static unsigned short hpulse_counter[PULSE_COUNTER_MAX];
 
 // default configuration
+static unsigned char verbose = 0;
 static unsigned char analyzer_mode = 0;
 static unsigned char realtime_mode = 0;
+static unsigned char timestamp = 0;
 static unsigned char pulse_counter_active = 0;
 static unsigned char decoder_delay = 1;
 static unsigned char bits_to_sample = 32;
@@ -91,10 +95,15 @@ static unsigned long timestamp_last_code;
 // wenn erfolgreich beenden öffnen
 // wenn kill runter gezalt hat auch öffnen
 
+// TODO
+// - timestamp
+
 static int usage() {
-	printf("Usage: rfsniffer -j -c -nX -dX -a -r -bX -sX -SX -xX -yX -zX\n");
+	printf("Usage: rfsniffer -v -j -c -nX -dX -a -r -bX -sX -SX -xX -yX -zX\n");
 	printf("  void  normal mode, sync on known pulses, sample and decode messages\n");
+	printf("  -v    verbose output\n");
 	printf("  -j    print messages as JSON\n");
+	printf("  -t    add timestamp to messages\n");
 	printf("  -c    activate pulse length counter\n");
 	printf("  -n X  pulse length counter noise level (default 100µs)\n");
 	printf("  -e    process each single code (default collect)\n");
@@ -113,7 +122,7 @@ static int usage() {
 static int rfsniffer_main(int argc, char **argv) {
 	if (argc > 0) {
 		int c, i;
-		while ((c = getopt(argc, argv, "ab:cd:ejn:rs:S:x:y:z:")) != -1) {
+		while ((c = getopt(argc, argv, "ab:cd:ejn:rs:S:tvx:y:z:")) != -1) {
 			switch (c) {
 			case 'a':
 				analyzer_mode = 1;
@@ -173,6 +182,12 @@ static int rfsniffer_main(int argc, char **argv) {
 					break;
 				}
 				break;
+			case 't':
+				timestamp = 1; // TODO
+				break;
+			case 'v':
+				verbose = 1;
+				break;
 			case 'x':
 				sync_min = strtoul(optarg, NULL, 0);
 				break;
@@ -213,7 +228,8 @@ static unsigned long decode_0110(unsigned long long in) {
 			out += 1;
 		} else {
 #ifdef RFSNIFFER_MAIN
-			printf("0110 decode error %s\n", printbits64(in, 0x0001000100010001));
+			if (verbose)
+				printf("0110 decode error %s\n", printbits64(in, 0x0001000100010001));
 #endif
 			return 0;
 		}
@@ -231,14 +247,16 @@ static void decode_nexus(unsigned long long raw, unsigned char repeat) {
 	// we want at least 3 identical messages
 	if (1 <= repeat && repeat <= 3) {
 #ifdef RFSNIFFER_MAIN
-		printf("NEXUS {%d} too few repeats, discard message 0x%08llx = %s\n", repeat, raw, printbits64(raw, 0x1011001101));
+		if (verbose)
+			printf("NEXUS {%d} too few repeats, discard message 0x%08llx = %s\n", repeat, raw, printbits64(raw, 0x1011001101));
 #endif
 		return;
 	}
 
 	if ((raw & 0x0f00) != 0x0f00) {
 #ifdef RFSNIFFER_MAIN
-		printf("NEXUS message verification failed 0x%08llx = %s\n", raw, printbits64(raw, 0x1011001101));
+		if (verbose)
+			printf("NEXUS message verification failed 0x%08llx = %s\n", raw, printbits64(raw, 0x1011001101));
 #endif
 		return;
 	}
@@ -341,7 +359,8 @@ static void decode_anaylzer(unsigned long long raw, unsigned char r) {
 static void decode(unsigned char pattern, unsigned long long code, unsigned char repeat) {
 	if (!code) {
 #ifdef RFSNIFFER_MAIN
-		printf("DECODE received empty message\n");
+		if (verbose)
+			printf("DECODE received empty message\n");
 #endif
 		return;
 	}
@@ -363,68 +382,76 @@ static void decode(unsigned char pattern, unsigned long long code, unsigned char
 	}
 }
 
-static void matrix_store(unsigned char pattern, unsigned long long code) {
-	unsigned char entries = matrix[pattern][0];
-	matrix[pattern][entries] = code;
-	matrix[pattern][0]++;
-}
-
-static void matrix_decode_pattern(unsigned char pattern) {
-	unsigned char entries = matrix[pattern][0];
-	unsigned char repeat, index = 0;
+static void matrix_decode_pattern(unsigned char x) {
 	unsigned long long code;
+	unsigned char repeat, y = 1;
 
 	if (collect_identical_codes) {
 		// TODO find ALL identical codes, not only when differs
-		code = matrix[pattern][index];
+		code = matrix[x][y];
 		repeat = 0;
 		do {
-			if (code == matrix[pattern][index])
+			if (code == matrix[x][y])
 				repeat++; // still the same code
 			else {
-				decode(pattern, code, repeat);
-				code = matrix[pattern][index];
+				decode(x, code, repeat);
+				code = matrix[x][y];
 				repeat = 1; // new code
 			}
-		} while (++index < entries);
-		// rewind once, decode and increment again
-		index--;
-		decode(pattern, code, repeat);
-		index++;
+		} while (++y < matrix[x][0]);
+		// all identical or the last one
+		decode(x, code, repeat);
 	} else {
 		do {
-			code = matrix[pattern][index];
-			decode(pattern, code, 0);
-		} while (++index < entries);
+			code = matrix[x][y];
+			decode(x, code, 0);
+		} while (++y < matrix[x][0]);
 	}
 }
 
 static void matrix_decode() {
-	unsigned char pattern, index, filled = 0;
+	unsigned char x, y, filled = 0;
 
 	// check if empty
-	for (pattern = 0; pattern < 0xff; pattern++) {
-		index = matrix[pattern][0];
-		if (index)
+	for (x = 0; x < BUFFER; x++) {
+		y = matrix[x][0];
+		if (y > 1)
 			filled = 1;
 	}
 	if (!filled)
 		return;
 
-	printf("MATRIX codes ");
-	for (pattern = 0; pattern < 0xff; pattern++) {
-		index = matrix[pattern][0];
-		if (index)
-			printf("%d:%d ", pattern, index);
+	// print summary
+	if (verbose) {
+		printf("MATRIX ");
+		for (x = 0; x < BUFFER; x++) {
+			y = matrix[x][0];
+			if (y > 1)
+				printf("[%u:%u] ", x, y - 1);
+		}
+		printf("\n");
 	}
-	printf("\n");
 
-	for (pattern = 0; pattern < 0xff; pattern++) {
-		index = matrix[pattern][0];
-		if (index)
-			matrix_decode_pattern(pattern);
+	// decode a column
+	for (x = 0; x < BUFFER; x++) {
+		y = matrix[x][0];
+		if (y > 1)
+			matrix_decode_pattern(x);
 
-		matrix[pattern][0] = 0;
+		matrix[x][0] = 1;
+	}
+}
+
+static void matrix_store(unsigned char x, unsigned long long code) {
+	unsigned char ynext = matrix[x][0];
+	matrix[x][ynext] = code;
+	matrix[x][0]++;
+}
+
+static void matrix_init() {
+	memset(matrix, 0, sizeof(matrix));
+	for (unsigned char i = 0; i < BUFFER; i++) {
+		matrix[i][0] = 1; // point to next free entry
 	}
 }
 
@@ -564,7 +591,8 @@ static void* realtime_decoder(void *arg) {
 			gettimeofday(&tNow, NULL);
 			age_last_message = (((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000) - timestamp_last_code;
 #ifdef RFSNIFFER_MAIN
-			printf("DECODER receiving in progress %lums\n", age_last_message);
+			if (verbose)
+				printf("DECODER receiving in progress %lums\n", age_last_message);
 #endif
 		}
 
@@ -624,8 +652,8 @@ static void* realtime_sampler(void *arg) {
 	// initialize tLast for correct 1st pulse calculation
 	gettimeofday(&tLast, NULL);
 
-	// clear matrix
-	memset(matrix, 0, sizeof(matrix));
+	// initialize the matrix
+	matrix_init();
 
 	state = 0;
 	if (analyzer_mode) {
@@ -649,7 +677,10 @@ static void* realtime_sampler(void *arg) {
 		else
 			csample = CNONE;
 
-		printf("SAMPLER sync on %lu-%luµs %s pulses, sampling %d %s bits, 0/1 divider pulse length %luµs\n", sync_min, sync_max, csync, bits_to_sample, csample, bitdivider);
+#ifdef RFSNIFFER_MAIN
+		if (verbose)
+			printf("SAMPLER sync on %lu-%luµs %s pulses, sampling %d %s bits, 0/1 divider pulse length %luµs\n", sync_min, sync_max, csync, bits_to_sample, csample, bitdivider);
+#endif
 	}
 
 	while (1) {
@@ -689,7 +720,10 @@ static void* realtime_sampler(void *arg) {
 				else
 					hpulse_counter[pulse_counter]++;
 			} else {
-				printf("SAMPLER pulse_counter overflow %d\n", pulse_counter);
+#ifdef RFSNIFFER_MAIN
+				if (verbose)
+					printf("SAMPLER pulse_counter overflow %d\n", pulse_counter);
+#endif
 			}
 
 		} else {
@@ -697,7 +731,8 @@ static void* realtime_sampler(void *arg) {
 			// error detection
 			if (--state_reset == 0) {
 #ifdef RFSNIFFER_MAIN
-				printf("SAMPLER sampling on pattern %d aborted\n", state);
+				if (verbose)
+					printf("SAMPLER sampling on pattern %d aborted\n", state);
 #endif
 				state = 0;
 				continue;
@@ -904,7 +939,7 @@ static unsigned short stream_rewind(unsigned short current, unsigned short posit
 
 static void stream_dump(unsigned short start, unsigned short positions) {
 	unsigned short i, l, h;
-	printf("REWIND %u %u\n", start, positions);
+	printf("DUMP %05u+%u :: ", start, positions);
 	for (i = 0; i < positions; i++) {
 		l = lstream[start];
 		h = hstream[start];
@@ -946,7 +981,8 @@ static void* stream_decoder(void *arg) {
 			}
 			if (progress) {
 #ifdef RFSNIFFER_MAIN
-				printf("DECODER receiving in progress, wait\n");
+				if (verbose)
+					printf("DECODER receiving in progress, wait\n");
 #endif
 				msleep(100);
 			}
@@ -954,7 +990,8 @@ static void* stream_decoder(void *arg) {
 
 #ifdef RFSNIFFER_MAIN
 		delta = (stream_write > stream_last) ? stream_write - stream_last : 0xffff - stream_last + stream_write;
-		printf("DECODER stream [%05u:%04u]\n", stream_write, delta);
+		if (verbose)
+			printf("DECODER stream [%05u:%04u]\n", stream_write, delta);
 #endif
 
 		do {
@@ -974,31 +1011,48 @@ static void* stream_decoder(void *arg) {
 					printf("SAMPLER HIGH pulse_counter overflow %d\n", h);
 			}
 
+			// TODO T1SMIN stimmt jetzt nocht mehr -> 10x
+
 			if (380 < l && l < 400) {
 				// not a real sync - it's the pause between 1st and 2nd message - but 1st message is always blurred
-				printf("DECODER %u SYNC on NEXUS\n", l);
+				if (verbose)
+					printf("DECODER %u SYNC on NEXUS\n", l);
 				code = stream_probe_low(stream_read, 36, 150);
 				if (code)
 					matrix_store(1, code);
 
 			} else if (T1SMIN < l && l < T1SMAX) {
-				printf("DECODER %u SYNC on FLAMINGO28\n", l);
+				if (verbose)
+					printf("DECODER %u SYNC on FLAMINGO28\n", l);
 				code = stream_probe_high(stream_read, 28, T1X2);
 				if (code)
 					matrix_store(2, code);
 
 			} else if (T4SMIN < l && l < T4SMAX) {
-				printf("DECODER %u SYNC on FLAMINGO24\n", l);
+				if (verbose)
+					printf("DECODER %u SYNC on FLAMINGO24\n", l);
 				code = stream_probe_high(stream_read, 24, T1X2);
 				if (code)
 					matrix_store(3, code);
 
 			} else if (T2S1MIN < l && l < T2S1MAX) {
-				printf("DECODER %u SYNC on FLAMINGO32\n", l);
+				if (verbose)
+					printf("DECODER %u SYNC on FLAMINGO32\n", l);
 				code = stream_probe_low(stream_read, 64, T2Y);
 				if (code)
 					matrix_store(4, code);
 
+			} else if (sync_min < l && l < sync_max) {
+				if (verbose) {
+					printf("DECODER %u SYNC on ?, ", l);
+					stream_dump(stream_read, 8);
+				}
+				code = stream_probe_low(stream_read, bits_to_sample, bitdivider);
+				if (code)
+					matrix_store(255, code);
+				code = stream_probe_high(stream_read, bits_to_sample, bitdivider);
+				if (code)
+					matrix_store(255, code);
 			}
 
 		} while (++stream_read != stream_write); // follow the stream_write position
@@ -1061,8 +1115,8 @@ static void* stream_sampler(void *arg) {
 	// initialize tLast for correct 1st pulse calculation
 	gettimeofday(&tLast, NULL);
 
-	// clear matrix
-	memset(matrix, 0, sizeof(matrix));
+	// initialize the matrix
+	matrix_init();
 
 	stream_write = 0;
 	while (1) {
