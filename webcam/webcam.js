@@ -27,6 +27,7 @@ function picture(hour, src) {
 		hours[i].style.background = '#fff';
 	}
 	hour.style.background = '#efefef';
+	document.getElementById('data').style.display = "none";
 	document.getElementById('video').style.display = "none";
 	var myImage = document.getElementById("image");
 	myImage.style.display = "inline";
@@ -34,6 +35,7 @@ function picture(hour, src) {
 }
 
 function video(vidURL) {
+	document.getElementById('data').style.display = "none";
 	document.getElementById('image').style.display = "none";
 	document.getElementById('navigation-top').style.display = "none";
 	var myVideo = document.getElementById('video');
@@ -60,15 +62,6 @@ function loadVideos() {
 	});
 	request.send();
 }
-
-function updateImage() {
-	var current = document.getElementById("image");
-	if (current.src.indexOf("&ts=") > -1) {
-		current.src = current.src.substring(0, current.src.lastIndexOf("&ts="))
-				+ "&ts=" + new Date().getTime();
-	}
-}
-
 function updateData() {
 	var request = new XMLHttpRequest();
 	request.open("GET", "../data.php");
@@ -84,9 +77,16 @@ function updateData() {
 	request.send();
 }
 
+function updateImage() {
+	var curr = document.getElementById("image");
+	if (curr.src.indexOf("&ts=") > -1) {
+		curr.src = curr.src.substring(0, curr.src.lastIndexOf("&ts=")) + "&ts=" + new Date().getTime();
+		updateData();
+	}
+}
+
 function update() {
 	updateImage();
-	updateData();
 }
 
 window.onload = function() {

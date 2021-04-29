@@ -39,8 +39,7 @@
 		<div id="menu-left">
 			<ul>
 				<li onclick="live();">Live</li>
-				<li class="has-sub">
-					Tag >>>
+				<li class="has-sub">Tag >>>
 					<ul>
 						<li onclick="video('1.mp4');">Montag</li>
 						<li onclick="video('2.mp4');">Dienstag</li>
@@ -53,8 +52,7 @@
 				</li>
 				<li onclick="video('week.mp4');">Woche</li>
 				<li onclick="video('month.mp4');">Monat</li>
-				<li class="has-sub">
-					Jahr >>>
+				<li class="has-sub">Jahr >>>
 					<ul>
 						<li onclick="video('year-09.mp4');">09 Uhr</li>
 						<li onclick="video('year-12.mp4');">12 Uhr</li>
@@ -71,8 +69,7 @@
 			<ul>
 				<li onclick="high()">High</li>
 				<li onclick="low()">Low</li>
-				<li class="has-sub">
-					<<< Highlights
+				<li class="has-sub"><<< Highlights
 					<ul id="videos">
 					</ul>
 				</li>
@@ -82,8 +79,11 @@
 
 	<div id="content">
 		<img id="image" src="../image.php?url=current.jpg&ts=" />
-		<div id="temp"></div>
-		<div id="humi"></div>
+		<div id="data">
+			<div id="temp"></div>
+			<div id="humi"></div>
+			<div id="mtime"></div>
+		</div>
 		<video id="video" controls>
 			<source src="1.mp4">
 		</video>
