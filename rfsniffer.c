@@ -48,7 +48,7 @@ static void* stream_sampler(void *arg);
 static unsigned short lstream[0xffff], hstream[0xffff];
 static unsigned short stream_write;
 
-// code matrix: x=pattern, y=code, y0 contains next free row
+// code matrix: x=code pattern, y=code number, [x][0] contains next free entry
 static unsigned long long matrix[BUFFER][BUFFER];
 
 // pulse counters: index equals pulse length, e.g. 10µs=1, 20µs=2, etc
@@ -117,9 +117,9 @@ static int usage() {
 	printf("  -b X  analyzer: bits to sample (0 - 64) default 32\n");
 	printf("  -s X  analyzer: sync on pulse 0=LOW (default) 1=HIGH 2=EDGE)\n");
 	printf("  -S X  analyzer: sample on pulse 0=LOW (default) 1=HIGH 2=EDGE)\n");
-	printf("  -x X  analyzer: sync pulse min length in microseconds\n");
-	printf("  -y X  analyzer: sync pulse max length in microseconds\n");
-	printf("  -z X  analyzer: 0/1 bit divider pulse length in microseconds\n");
+	printf("  -x X  analyzer: sync pulse min length in microseconds/10\n");
+	printf("  -y X  analyzer: sync pulse max length in microseconds/10\n");
+	printf("  -z X  analyzer: 0/1 bit divider pulse length in microseconds/10\n");
 	return EXIT_FAILURE;
 }
 

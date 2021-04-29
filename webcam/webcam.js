@@ -43,18 +43,7 @@ function video(vidURL) {
 	myVideo.play();
 }
 
-function updateImage() {
-	var current = document.getElementById("image");
-	if (current.src.indexOf("&ts=") > -1) {
-		current.src = current.src.substring(0, current.src.lastIndexOf("&ts=")) + "&ts=" + new Date().getTime();
-	}
-}
-
-window.onload = function() {
-	setInterval(function() {
-		updateImage()
-	}, 10000);
-
+function loadVideos() {
 	var request = new XMLHttpRequest();
 	request.open("GET", "../videos.php");
 	request.addEventListener('load', function(event) {
@@ -70,4 +59,38 @@ window.onload = function() {
 		}
 	});
 	request.send();
+}
+
+function updateImage() {
+	var current = document.getElementById("image");
+	if (current.src.indexOf("&ts=") > -1) {
+		current.src = current.src.substring(0, current.src.lastIndexOf("&ts="))
+				+ "&ts=" + new Date().getTime();
+	}
+}
+
+function updateData() {
+	var request = new XMLHttpRequest();
+	request.open("GET", "../data.php");
+	request.addEventListener('load', function(event) {
+		if (this.status == 200) {
+			var data = JSON.parse(this.responseText);
+			Object.entries(data).forEach(([k, v]) => {
+				var e = document.getElementById(k);
+				if (e) e.innerHTML = v;
+			});
+		}
+	});
+	request.send();
+}
+
+function update() {
+	updateImage();
+	updateData();
+}
+
+window.onload = function() {
+	updateData();
+	loadVideos();
+	setInterval(update, 10000);
 }

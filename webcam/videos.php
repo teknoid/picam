@@ -32,5 +32,6 @@ foreach ($files as $mtime => $file) {
     );
     array_push($json, $entry);
 }
+
 echo json_encode($json);
 ?>
