@@ -27,14 +27,15 @@
 #include "rfsniffer.h"
 #include "flamingo.h"
 #include "utils.h"
-#include "frozen.h"
 
-#define RFSNIFFER_MAIN
+// #define RFSNIFFER_MAIN
 
+#ifdef RFSNIFFER_MAIN
 const static char *CLOW = "LOW\0";
 const static char *CHIGH = "HIGH\0";
 const static char *CEDGE = "EDGE\0";
 const static char *CNONE = "NONE\0";
+#endif
 
 static pthread_t thread_decoder;
 static void* realtime_decoder(void *arg);
@@ -48,7 +49,7 @@ static void* stream_sampler(void *arg);
 static unsigned short lstream[0xffff], hstream[0xffff];
 static unsigned short stream_write;
 
-// code matrix: x=code pattern, y=code number, [x][0] contains next free entry
+// code matrix: x=protocol code, y=code number, [x][0] contains next free entry
 static unsigned long long matrix[BUFFER][BUFFER];
 
 // pulse counters: index equals pulse length, e.g. 10µs=1, 20µs=2, etc
@@ -56,8 +57,6 @@ static unsigned short lpulse_counter[PULSE_COUNTER_MAX];
 static unsigned short hpulse_counter[PULSE_COUNTER_MAX];
 
 // default configuration
-static unsigned char verbose = 0;
-static unsigned char quiet = 0;
 static unsigned char analyzer_mode = 0;
 static unsigned char realtime_mode = 0;
 static unsigned char timestamp = 0;
@@ -65,7 +64,6 @@ static unsigned char pulse_counter_active = 0;
 static unsigned char decoder_delay = 1;
 static unsigned char bits_to_sample = 32;
 static unsigned char collect_identical_codes = 1;
-static unsigned char json = 0;
 static unsigned char sync_on_0 = 1;
 static unsigned char sync_on_1 = 0;
 static unsigned char sample_on_0 = 1;
@@ -74,7 +72,13 @@ static unsigned long sync_min = 1800;
 static unsigned long sync_max = 2000;
 static unsigned long bitdivider = 1500;
 static unsigned short noise = 100;
-static char *sysfslike = 0;
+
+unsigned char verbose = 0;
+unsigned char quiet = 0;
+unsigned char json = 0;
+char *sysfslike = 0;
+
+rfsniffer_handler_t rfsniffer_handler;
 
 static unsigned long timestamp_last_code;
 
@@ -100,6 +104,13 @@ static unsigned long timestamp_last_code;
 // TODO
 // - timestamp
 
+#ifdef RFSNIFFER_MAIN
+static void rfsniffer_dummy_handler(unsigned short protocol, unsigned long long raw, int device, int channel, int key, int value) {
+	if (!quiet) {
+//		printf("HANDLER Protocol = %d, Raw = 0x%llx, Device = 0x%x, Channel = %d, Event = %d, Value = 0x%02x\n", protocol, raw, device, channel, key, value);
+	}
+}
+
 static int usage() {
 	printf("Usage: rfsniffer -v -q -jX -fX -c -nX -dX -a -r -bX -sX -SX -xX -yX -zX\n");
 	printf("  void  normal mode, sync on known pulses, sample and decode messages\n");
@@ -124,6 +135,9 @@ static int usage() {
 }
 
 static int rfsniffer_main(int argc, char **argv) {
+	if (!bcm2835_init())
+		return -1;
+
 	if (argc > 0) {
 		int c, i;
 		while ((c = getopt(argc, argv, "ab:cd:ef:jn:qrs:S:tvx:y:z:")) != -1) {
@@ -213,200 +227,14 @@ static int rfsniffer_main(int argc, char **argv) {
 		}
 	}
 
-	rfsniffer_init();
+	rfsniffer_init(&rfsniffer_dummy_handler);
 	pause();
 	rfsniffer_close();
 	return 0;
 }
-
-static unsigned long decode_0110(unsigned long long in) {
-	unsigned long long shift;
-	unsigned char mask = 0b11;
-	unsigned char bit0 = 0b01;
-	unsigned char bit1 = 0b10;
-	unsigned char count = 64;
-	unsigned long out = 0;
-
-	// printf("\n0110 %s", printbits64(in, 0x0001000100010001));
-	while (count > 0) {
-		shift = (in >> 62) & mask;
-
-		out <<= 1;
-		if (shift == bit0) {
-			out += 0;
-		} else if (shift == bit1) {
-			out += 1;
-		} else {
-#ifdef RFSNIFFER_MAIN
-			if (verbose)
-				printf("0110 decode error %s\n", printbits64(in, 0x0001000100010001));
 #endif
-			return 0;
-		}
-		count -= 2;
-		in <<= 2;
-	}
-	// printf("--> %s\n", printbits(out, 0x00010001));
-	return out;
-}
 
-static void decode_nexus(unsigned long long raw, unsigned char repeat) {
-
-	// sensor transmits 10 messages
-	// 1st message get's lost due to sync on pause between repeats
-	// we want at least 3 identical messages
-	if (1 <= repeat && repeat <= 3) {
-#ifdef RFSNIFFER_MAIN
-		if (verbose)
-			printf("NEXUS {%d} too few repeats, discard message 0x%08llx = %s\n", repeat, raw, printbits64(raw, 0x1011001101));
-#endif
-		return;
-	}
-
-	if ((raw & 0x0f00) != 0x0f00) {
-#ifdef RFSNIFFER_MAIN
-		if (verbose)
-			printf("NEXUS message verification failed 0x%08llx = %s\n", raw, printbits64(raw, 0x1011001101));
-#endif
-		return;
-	}
-
-	// https://github.com/merbanan/rtl_433/blob/master/src/devices/nexus.c
-	// 9 nibbles: [id0] [id1] [flags] [temp0] [temp1] [temp2] [const] [humi0] [humi1]
-	unsigned long long code = raw;
-	unsigned char h = code & 0xff;
-	code >>= 8;
-	code >>= 4; // always 1111 - used for message verification
-	short t_raw = (short) (code & 0x0fff);
-	code >>= 12;
-	unsigned char c = code & 0x07;
-	code >>= 3;
-	unsigned char b = code & 0x01;
-	code >>= 1;
-	unsigned char i = code & 0xff;
-
-	// calculate float temperature value
-	float t = (t_raw & 0x0800) ? -0.1 * (0x0fff - t_raw) : 0.1 * t_raw;
-
-	// TODO timestamp via utils
-
-	// create strings
-	char craw[12], ctemp[6], chumi[3], cbatt[2];
-	snprintf(craw, 12, "0x%08llx", raw);
-	snprintf(ctemp, 6, "%02.1f", t);
-	snprintf(chumi, 3, "%u", h);
-	snprintf(cbatt, 2, "%u", b);
-
-	if (json) {
-		char format[BUFFER];
-		struct json_out jout = JSON_OUT_FILE(stdout);
-		snprintf(format, BUFFER, "%s", "{ %Q:%Q, %Q:%Q, %Q:%d, %Q:%d, %Q:%d, %Q:%d, %Q:%Q, %Q:%d }\n");
-		json_printf(&jout, format, "type", "NEXUS", "raw", craw, "repeat", repeat, "id", i, "channel", c, "battery", b, "temp", ctemp, "humi", h);
-	}
-
-	if (sysfslike) {
-		// e.g. creates file entries like /tmp/NEXUS/231/0/temp
-		create_sysfslike(sysfslike, "temp", ctemp, "%s%d%d", "NEXUS", i, c);
-		create_sysfslike(sysfslike, "humi", chumi, "%s%d%d", "NEXUS", i, c);
-		create_sysfslike(sysfslike, "batt", cbatt, "%s%d%d", "NEXUS", i, c);
-	}
-
-	if (!quiet)
-		printf("NEXUS {%d} 0x%08llx Id = %d, Channel = %d, Battery = %s, Temp = %02.1fC, Hum = %d%%\n", repeat, raw, i, c, b ? "OK" : "LOW", t, h);
-}
-
-static void decode_flamingo28(unsigned long long raw, unsigned char r) {
-	unsigned long message;
-	unsigned int xmitter;
-	unsigned char channel, command, payload, rolling;
-
-	message = decrypt(raw);
-	decode_FA500(message, &xmitter, &channel, &command, &payload, &rolling);
-
-	if (json) {
-		char format[BUFFER], craw[12], cid[12];
-		snprintf(craw, 12, "0x%08llx", raw);
-		snprintf(cid, 12, "0x%04x", xmitter);
-		struct json_out jout = JSON_OUT_FILE(stdout);
-		snprintf(format, BUFFER, "%s", "{ %Q:%Q, %Q:%Q, %Q:%lu, %Q:%Q, %Q:%d, %Q:%d, %Q:%d, %Q:%d }\n");
-		json_printf(&jout, format, "type", "FLAMINGO28", "raw", craw, "sync", 0, "id", cid, "channel", channel, "command", command, "payload", payload, "rolling", rolling);
-	} else
-		printf("FLAMINGO28 0x%08llx Id = 0x%x, Channel = %d, Command = %d, Payload = 0x%02x, Rolling = %d\n", raw, xmitter, channel, command, payload, rolling);
-}
-
-static void decode_flamingo24(unsigned long long raw, unsigned char r) {
-
-	// TODO decode
-
-	if (json) {
-		char format[BUFFER], craw[12];
-		snprintf(craw, 12, "0x%08llx", raw);
-		struct json_out jout = JSON_OUT_FILE(stdout);
-		snprintf(format, BUFFER, "%s", "{ %Q:%Q, %Q:%Q, %Q:%lu }\n");
-		json_printf(&jout, format, "type", "FLAMINGO24", "raw", craw, "sync", sync);
-	} else
-		printf("FLAMINGO24 0x%08llx %s\n", raw, printbits(raw, 0x01010101));
-}
-
-static void decode_flamingo32(unsigned long long raw, unsigned char r) {
-
-	unsigned long code = decode_0110(raw);
-	if (code == 0)
-		return;
-
-	unsigned int xmitter;
-	unsigned char channel, command, payload;
-	unsigned long code_save = code;
-	channel = code & 0x0f;
-	code >>= 4; // channel
-	command = code & 0x0f;
-	code >>= 4; // channel
-	xmitter = code & 0xffff;
-	code >>= 16; // xmitter
-	payload = code & 0xff;
-
-	if (json) {
-		char format[BUFFER], craw[12], cid[12];
-		snprintf(craw, 12, "0x%04lx", code_save);
-		snprintf(cid, 12, "0x%04x", xmitter);
-		struct json_out jout = JSON_OUT_FILE(stdout);
-		snprintf(format, BUFFER, "%s", "{ %Q:%Q, %Q:%Q, %Q:%lu, %Q:%Q, %Q:%d, %Q:%d, %Q:%d }\n");
-		json_printf(&jout, format, "type", "FLAMINGO32", "raw", craw, "sync", 0, "id", cid, "channel", channel, "command", command, "payload", payload);
-	} else
-		printf("FLAMINGO32 0x%04lx Id = 0x%x, Channel = %d, Command = %d, Payload = 0x%02x\n", code_save, xmitter, channel, command, payload);
-}
-
-static void decode_anaylzer(unsigned long long raw, unsigned char r) {
-	printf("ANALYZER 0x%08llx %s\n", raw, printbits64(raw, 0x0101010101010101));
-}
-
-static void decode(unsigned char pattern, unsigned long long code, unsigned char repeat) {
-	if (!code) {
-#ifdef RFSNIFFER_MAIN
-		if (verbose)
-			printf("DECODE received empty message\n");
-#endif
-		return;
-	}
-
-	// dispatch to corresponding pattern decoder
-	switch (pattern) {
-	case 1:
-		return decode_nexus(code, repeat);
-	case 2:
-		return decode_flamingo28(code, repeat);
-	case 3:
-		return decode_flamingo24(code, repeat);
-	case 4:
-		return decode_flamingo32(code, repeat);
-	case 255:
-		return decode_anaylzer(code, repeat);
-	default:
-		printf("DECODE no decoder configured for pattern %d 0x%0llx\n", pattern, code);
-	}
-}
-
-static void matrix_decode_pattern(unsigned char x) {
+static void matrix_decode_protocol(unsigned char x) {
 	unsigned long long code;
 	unsigned char repeat, y = 1;
 
@@ -460,22 +288,21 @@ static void matrix_decode() {
 	for (x = 0; x < BUFFER; x++) {
 		y = matrix[x][0];
 		if (y > 1)
-			matrix_decode_pattern(x);
-
-		matrix[x][0] = 1;
+			matrix_decode_protocol(x);
+		matrix[x][0] = 1; // initialize next free entry
 	}
 }
 
 static void matrix_store(unsigned char x, unsigned long long code) {
 	unsigned char ynext = matrix[x][0];
 	matrix[x][ynext] = code;
-	matrix[x][0]++;
+	matrix[x][0]++; // increment next free entry
 }
 
 static void matrix_init() {
 	memset(matrix, 0, sizeof(matrix));
 	for (unsigned char i = 0; i < BUFFER; i++) {
-		matrix[i][0] = 1; // point to next free entry
+		matrix[i][0] = 1; // initialize next free entry
 	}
 }
 
@@ -524,76 +351,6 @@ static void dump_pulse_counters() {
 	// clear counter
 	memset(lpulse_counter, 0, sizeof(lpulse_counter));
 	memset(hpulse_counter, 0, sizeof(hpulse_counter));
-}
-
-int rfsniffer_init() {
-#ifdef RFSNIFFER_MAIN
-	if (!quiet)
-		printf("INIT test 2x 0xdeadbeef = %s\n", printbits64(0xdeadbeefdeadbeef, 0x0101010101010101));
-#endif
-
-	if (!bcm2835_init())
-		return -1;
-
-	void *sampler, *decoder;
-	if (realtime_mode) {
-		sampler = &realtime_sampler;
-		decoder = &realtime_decoder;
-#ifdef RFSNIFFER_MAIN
-		if (!quiet)
-			printf("INIT using realtime_sampler and realtime_decoder\n");
-#endif
-	} else {
-		sampler = &stream_sampler;
-		decoder = &stream_decoder;
-#ifdef RFSNIFFER_MAIN
-		if (!quiet)
-			printf("INIT using stream_sampler and stream_decoder\n");
-#endif
-	}
-
-	// decoder thread
-	if (pthread_create(&thread_decoder, NULL, decoder, NULL)) {
-		perror("Error creating decoder thread");
-		return -1;
-	}
-#ifdef RFSNIFFER_MAIN
-	if (!quiet)
-		printf("INIT started decoder thread\n");
-#endif
-
-	// sampler thread
-	if (pthread_create(&thread_sampler, NULL, sampler, NULL)) {
-		perror("Error creating sampler thread");
-		return -1;
-	}
-#ifdef RFSNIFFER_MAIN
-	if (!quiet)
-		printf("INIT started sampler thread\n");
-#endif
-
-	return 0;
-}
-
-int rfsniffer_close() {
-	if (thread_sampler) {
-		if (pthread_cancel(thread_sampler)) {
-			perror("Error canceling thread");
-		}
-		if (pthread_join(thread_sampler, NULL)) {
-			perror("Error joining thread");
-		}
-	}
-
-	if (thread_decoder) {
-		if (pthread_cancel(thread_decoder)) {
-			perror("Error canceling thread");
-		}
-		if (pthread_join(thread_decoder, NULL)) {
-			perror("Error joining thread");
-		}
-	}
-	return 0;
 }
 
 static void* realtime_decoder(void *arg) {
@@ -688,6 +445,8 @@ static void* realtime_sampler(void *arg) {
 	state = 0;
 	if (analyzer_mode) {
 		state = 254;
+
+#ifdef RFSNIFFER_MAIN
 		const char *csync, *csample;
 		if (sync_on_0 && sync_on_1)
 			csync = CEDGE;
@@ -707,7 +466,6 @@ static void* realtime_sampler(void *arg) {
 		else
 			csample = CNONE;
 
-#ifdef RFSNIFFER_MAIN
 		if (verbose)
 			printf("SAMPLER sync on %lu-%luµs %s pulses, sampling %d %s bits, 0/1 divider pulse length %luµs\n", sync_min, sync_max, csync, bits_to_sample, csample, bitdivider);
 #endif
@@ -762,16 +520,16 @@ static void* realtime_sampler(void *arg) {
 			if (--state_reset == 0) {
 #ifdef RFSNIFFER_MAIN
 				if (verbose)
-					printf("SAMPLER sampling on pattern %d aborted\n", state);
+					printf("SAMPLER sampling on protocol %d aborted\n", state);
 #endif
-				state = 0;
+				state = P_SYNC;
 				continue;
 			}
 		}
 
 		switch (state) {
 
-		case 0: // initial state: detect known SYNC pulses and define next sampling state
+		case P_SYNC: // initial state: detect known SYNC pulses and define next sampling state
 			code = 0;
 			state_reset = STATE_RESET;
 
@@ -780,23 +538,23 @@ static void* realtime_sampler(void *arg) {
 				if (3800 < pulse && pulse < 4000) {
 					// not a real sync - it's the pause between 1st and 2nd message
 					bits = 36;
-					state = 1;
+					state = P_NEXUS;
 				} else if (T1SMIN < pulse && pulse < T1SMAX) {
 					bits = 28;
-					state = 2;
+					state = P_FLAMINGO28;
 				} else if (T4SMIN < pulse && pulse < T4SMAX) {
 					bits = 24;
-					state = 3;
+					state = P_FLAMINGO24;
 				} else if (T2S1MIN < pulse && pulse < T2S1MAX) {
 					bits = 64;
-					state = 4;
+					state = P_FLAMINGO32;
 				}
 			} else {
 				// HIGH sync pulses
 			}
 			break;
 
-		case 1: // nexus - sample LOW pulses
+		case P_NEXUS: // nexus - sample LOW pulses
 			if (bits && pin) {
 				if (pulse > 1500)
 					code++;
@@ -804,14 +562,14 @@ static void* realtime_sampler(void *arg) {
 				if (--bits == 0) {
 					matrix_store(state, code);
 					timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
-					state = 0;
+					state = P_SYNC;
 				} else {
 					code <<= 1;
 				}
 			}
 			break;
 
-		case 2: // flamingo 28bit - sample HIGH pulses
+		case P_FLAMINGO28: // flamingo 28bit - sample HIGH pulses
 			if (bits && !pin) {
 				if (pulse > T1X2)
 					code++;
@@ -819,14 +577,14 @@ static void* realtime_sampler(void *arg) {
 				if (--bits == 0) {
 					matrix_store(state, code);
 					timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
-					state = 0;
+					state = P_SYNC;
 				} else {
 					code <<= 1;
 				}
 			}
 			break;
 
-		case 3: // flamingo 24bit - sample HIGH pulses
+		case P_FLAMINGO24: // flamingo 24bit - sample HIGH pulses
 			if (bits && !pin) {
 				if (pulse > T1X2)
 					code++;
@@ -834,27 +592,27 @@ static void* realtime_sampler(void *arg) {
 				if (--bits == 0) {
 					matrix_store(state, code);
 					timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
-					state = 0;
+					state = P_SYNC;
 				} else {
 					code <<= 1;
 				}
 			}
 			break;
 
-		case 4: // flamingo 32bit - sample LOW pulses
+		case P_FLAMINGO32: // flamingo 32bit - sample LOW pulses
 			if (bits && pin) {
 				code += pulse < T2Y ? 0 : 1;
 				if (--bits == 0) {
 					matrix_store(state, code);
 					timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
-					state = 0;
+					state = P_SYNC;
 				} else {
 					code <<= 1;
 				}
 			}
 			break;
 
-		case 254: // analyzer sync mode: find the SYNC pulse
+		case P_ANALYZE_SYNC: // analyzer sync mode: find the SYNC pulse
 			code = 0;
 			state_reset = STATE_RESET;
 
@@ -863,7 +621,7 @@ static void* realtime_sampler(void *arg) {
 				if (sync_on_0) {
 					if (sync_min < pulse && pulse < sync_max) {
 						bits = bits_to_sample;
-						state = 255; // next is analyzer sample mode
+						state = P_ANALYZE; // next is analyzer sample mode
 						printf("\nSYN ");
 					}
 				}
@@ -872,14 +630,14 @@ static void* realtime_sampler(void *arg) {
 				if (sync_on_1) {
 					if (sync_min < pulse && pulse < sync_max) {
 						bits = bits_to_sample;
-						state = 255; // next is analyzer sample mode
+						state = P_ANALYZE; // next is analyzer sample mode
 						printf("\nSYN ");
 					}
 				}
 			}
 			break;
 
-		case 255: // analyzer sample mode: sample bits and print
+		case P_ANALYZE: // analyzer sample mode: sample bits and print
 			if (bits) {
 				if (pin) {
 					// LOW pulse
@@ -890,7 +648,7 @@ static void* realtime_sampler(void *arg) {
 						if (--bits == 0) {
 							matrix_store(state, code);
 							timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
-							state = 254; // back to analyzer sync mode
+							state = P_ANALYZE_SYNC; // back to analyzer sync mode
 							printf("\n");
 						} else {
 							code <<= 1;
@@ -905,7 +663,7 @@ static void* realtime_sampler(void *arg) {
 						if (--bits == 0) {
 							matrix_store(state, code);
 							timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
-							state = 254; // back to analyzer sync mode
+							state = P_ANALYZE_SYNC; // back to analyzer sync mode
 							printf("\n");
 						} else {
 							code <<= 1;
@@ -917,12 +675,17 @@ static void* realtime_sampler(void *arg) {
 
 		default:
 			printf("illegal state %d\n", state);
-			state = 0;
+			state = P_SYNC;
 		}
 	}
 	return (void *) 0;
 }
 
+//
+// short high pulse followed by long low pulse or long high + short low pulse, no clock
+//       _              ___
+// 0 = _| |___    1 = _|   |_
+//
 unsigned long long stream_probe_low(unsigned short pos, unsigned char bits, unsigned short divider) {
 	unsigned long long code = 0;
 	unsigned short l, h;
@@ -942,6 +705,11 @@ unsigned long long stream_probe_low(unsigned short pos, unsigned char bits, unsi
 	return code;
 }
 
+//
+// clock pulse + data pulse, either short or long distance from clock to data pulse
+//       _   _               _      _
+// 0 = _| |_| |____    1 = _| |____| |_
+//
 unsigned long long stream_probe_high(unsigned short pos, unsigned char bits, unsigned short divider) {
 	unsigned long long code = 0;
 	unsigned short l, h;
@@ -1050,28 +818,28 @@ static void* stream_decoder(void *arg) {
 					printf("DECODER %u SYNC on NEXUS\n", l);
 				code = stream_probe_low(stream_read, 36, 150);
 				if (code)
-					matrix_store(1, code);
+					matrix_store(P_NEXUS, code);
 
 			} else if (T1SMIN < l && l < T1SMAX) {
 				if (verbose)
 					printf("DECODER %u SYNC on FLAMINGO28\n", l);
 				code = stream_probe_high(stream_read, 28, T1X2);
 				if (code)
-					matrix_store(2, code);
+					matrix_store(P_FLAMINGO28, code);
 
 			} else if (T4SMIN < l && l < T4SMAX) {
 				if (verbose)
 					printf("DECODER %u SYNC on FLAMINGO24\n", l);
 				code = stream_probe_high(stream_read, 24, T1X2);
 				if (code)
-					matrix_store(3, code);
+					matrix_store(P_FLAMINGO24, code);
 
 			} else if (T2S1MIN < l && l < T2S1MAX) {
 				if (verbose)
 					printf("DECODER %u SYNC on FLAMINGO32\n", l);
 				code = stream_probe_low(stream_read, 64, T2Y);
 				if (code)
-					matrix_store(4, code);
+					matrix_store(P_FLAMINGO32, code);
 
 			} else if (sync_min < l && l < sync_max) {
 				if (verbose) {
@@ -1080,10 +848,10 @@ static void* stream_decoder(void *arg) {
 				}
 				code = stream_probe_low(stream_read, bits_to_sample, bitdivider);
 				if (code)
-					matrix_store(255, code);
+					matrix_store(P_ANALYZE, code);
 				code = stream_probe_high(stream_read, bits_to_sample, bitdivider);
 				if (code)
-					matrix_store(255, code);
+					matrix_store(P_ANALYZE, code);
 			}
 
 		} while (++stream_read != stream_write); // follow the stream_write position
@@ -1212,6 +980,75 @@ static void* stream_sampler(void *arg) {
 	}
 
 	return (void *) 0;
+}
+
+int rfsniffer_init(rfsniffer_handler_t handler) {
+	rfsniffer_handler = handler;
+
+#ifdef RFSNIFFER_MAIN
+	if (!quiet)
+		printf("INIT test 2x 0xdeadbeef = %s\n", printbits64(0xdeadbeefdeadbeef, 0x0101010101010101));
+#endif
+
+	void *sampler, *decoder;
+	if (realtime_mode) {
+		sampler = &realtime_sampler;
+		decoder = &realtime_decoder;
+#ifdef RFSNIFFER_MAIN
+		if (!quiet)
+			printf("INIT using realtime_sampler and realtime_decoder\n");
+#endif
+	} else {
+		sampler = &stream_sampler;
+		decoder = &stream_decoder;
+#ifdef RFSNIFFER_MAIN
+		if (!quiet)
+			printf("INIT using stream_sampler and stream_decoder\n");
+#endif
+	}
+
+	// decoder thread
+	if (pthread_create(&thread_decoder, NULL, decoder, NULL)) {
+		perror("Error creating decoder thread");
+		return -1;
+	}
+#ifdef RFSNIFFER_MAIN
+	if (!quiet)
+		printf("INIT started decoder thread\n");
+#endif
+
+	// sampler thread
+	if (pthread_create(&thread_sampler, NULL, sampler, NULL)) {
+		perror("Error creating sampler thread");
+		return -1;
+	}
+#ifdef RFSNIFFER_MAIN
+	if (!quiet)
+		printf("INIT started sampler thread\n");
+#endif
+
+	return 0;
+}
+
+int rfsniffer_close() {
+	if (thread_sampler) {
+		if (pthread_cancel(thread_sampler)) {
+			perror("Error canceling thread");
+		}
+		if (pthread_join(thread_sampler, NULL)) {
+			perror("Error joining thread");
+		}
+	}
+
+	if (thread_decoder) {
+		if (pthread_cancel(thread_decoder)) {
+			perror("Error canceling thread");
+		}
+		if (pthread_join(thread_decoder, NULL)) {
+			perror("Error joining thread");
+		}
+	}
+	return 0;
 }
 
 #ifdef RFSNIFFER_MAIN

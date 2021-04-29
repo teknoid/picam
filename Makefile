@@ -1,15 +1,15 @@
 CFLAGS = -Wall -Wno-unused-function
 LFLAGS = -Wall
 
-LIBS = -lpthread -lwiringPi -lrt -lbcm2835
+LIBS = -lpthread -lrt -lbcm2835 -lwiringPi
 
 SRCS = $(wildcard *.c)
 OBJS = $(SRCS:.c=.o)
 
 all: clean mcp flamingo mcp3204 rfsniffer
 
-mcp: mcp.o utils.o xmas.o mcp3204.o webcam.o flamingo.o rfsniffer.o frozen.o
-	$(CC) $(CFLAGS) -o mcp mcp.o utils.o xmas.o mcp3204.o webcam.o flamingo.o rfsniffer.o frozen.o $(LIBS)
+mcp: mcp.o utils.o xmas.o mcp3204.o webcam.o flamingo.o rfsniffer.o rfcodec.o frozen.o
+	$(CC) $(CFLAGS) -o mcp mcp.o utils.o xmas.o mcp3204.o webcam.o flamingo.o rfsniffer.o rfcodec.o frozen.o $(LIBS)
 
 flamingo: flamingo.o utils.o 
 	$(CC) $(CFLAGS) -DFLAMINGO_MAIN -c flamingo.c
@@ -20,11 +20,11 @@ mcp3204: mcp3204.o utils.o
 	$(CC) $(LFLAGS) -o mcp3204 mcp3204.o utils.o $(LIBS)
 
 rfsniffer: rfsniffer.o flamingo.o utils.o frozen.o
-	$(CC) $(CFLAGS) -DRFSNIFFER_MAIN -c rfsniffer.c flamingo.c
-	$(CC) $(LFLAGS) -o rfsniffer rfsniffer.o flamingo.o utils.o frozen.o $(LIBS)
+	$(CC) $(CFLAGS) -DRFSNIFFER_MAIN -c flamingo.c rfsniffer.c rfcodec.c
+	$(CC) $(LFLAGS) -o rfsniffer flamingo.o rfsniffer.o rfcodec.o utils.o frozen.o $(LIBS)
 
 #rfsniffer-wiringpi: rfsniffer-wiringpi.o flamingo.o utils.o
-#	$(CC) $(CFLAGS) $(LIBS) -o rfsniffer-wiringpi rfsniffer-wiringpi.o flamingo.o utils.o
+#	$(CC) $(CFLAGS) -lpthread -lrt -lwiringPi -o rfsniffer-wiringpi rfsniffer-wiringpi.o flamingo.o utils.o
 
 .c.o:
 	$(CC) -c $(CFLAGS) $<

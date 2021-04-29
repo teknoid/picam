@@ -13,6 +13,8 @@
 #include "webcam.h"
 #include "xmas.h"
 #include "flamingo.h"
+#include "rfcodec.h"
+#include "rfsniffer.h"
 
 mcp_config_t *cfg;
 
@@ -76,12 +78,17 @@ static void mcp_init() {
 		exit(EXIT_FAILURE);
 	}
 
+	if (rfsniffer_init(NULL) < 0) {
+		exit(EXIT_FAILURE);
+	}
+
 	syslog(LOG_NOTICE, "all modules successfully initialized");
 }
 
 static void mcp_close() {
 	webcam_close();
 	xmas_close();
+	rfsniffer_close();
 
 	syslog(LOG_NOTICE, "all modules successfully closed");
 }
