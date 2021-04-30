@@ -9,16 +9,6 @@
 #include <sys/stat.h>
 
 #include "mcp.h"
-#include "mcp3204.h"
-#include "webcam.h"
-#include "xmas.h"
-#include "flamingo.h"
-#include "rfsniffer.h"
-
-typedef struct mcp_config_t {
-	int daemonize;
-	rfsniffer_config_t *rfconfig;
-} mcp_config_t;
 
 static mcp_config_t *cfg;
 
@@ -66,7 +56,20 @@ static void daemonize() {
 }
 
 static void mcp_init() {
+	cfg->flamingocfg = flamingo_default_config();
+	cfg->flamingocfg->flamingo_handler = 0;
+	cfg->flamingocfg->pattern = 0;
+	cfg->flamingocfg->quiet = 1;
 	if (flamingo_init(0, 0) < 0) {
+		exit(EXIT_FAILURE);
+	}
+
+	cfg->rfsniffercfg = rfsniffer_default_config();
+	cfg->rfsniffercfg->rfsniffer_handler = &rfsniffer_syslog_handler;
+	cfg->rfsniffercfg->quiet = 1;
+	cfg->rfsniffercfg->sysfslike = "/ram";
+	cfg->rfsniffercfg->realtime_mode = 1;
+	if (rfsniffer_init() < 0) {
 		exit(EXIT_FAILURE);
 	}
 
@@ -82,14 +85,6 @@ static void mcp_init() {
 		exit(EXIT_FAILURE);
 	}
 
-	cfg->rfconfig = rfsniffer_default_config();
-	cfg->rfconfig->rfsniffer_handler = &rfsniffer_syslog_handler;
-	cfg->rfconfig->quiet = 1;
-	cfg->rfconfig->realtime_mode = 1;
-	if (rfsniffer_init() < 0) {
-		exit(EXIT_FAILURE);
-	}
-
 	syslog(LOG_NOTICE, "all modules successfully initialized");
 }
 
@@ -97,6 +92,7 @@ static void mcp_close() {
 	webcam_close();
 	xmas_close();
 	rfsniffer_close();
+	flamingo_close();
 
 	syslog(LOG_NOTICE, "all modules successfully closed");
 }

@@ -1,9 +1,16 @@
-#define RX					2
-#define TX					0
+typedef void (*flamingo_handler_t)(unsigned int, unsigned char, unsigned char, unsigned char);
+
+typedef struct flamingo_config_t {
+	unsigned char rx;
+	unsigned char tx;
+	unsigned char quiet;
+	int pattern;
+	flamingo_handler_t flamingo_handler;
+} flamingo_config_t;
 
 // transmitter id's of our known remote control units
 const static unsigned long REMOTES[5] = { 0x53cc, 0x835a, 0x31e2, 0x295c, 0x272d };
-//											White1	White2	White3	Black	SF500
+//										  White1  White2  White3  Black   SF500
 
 // timings for 28bit rc1 and 24bit rc4 patterns
 // tested with 1 C 1: min 180 max 350 --> 330 is closest to the original remote
@@ -50,9 +57,8 @@ const static unsigned char CKEY[16] = { 9, 6, 3, 8, 10, 0, 2, 12, 4, 14, 7, 5, 1
 // decryption key (invers encryption key - exchanged index & value)
 const static unsigned char DKEY[16] = { 5, 12, 6, 2, 8, 11, 1, 10, 3, 0, 4, 14, 7, 15, 9, 13 };
 
-typedef void (*flamingo_handler_t)(unsigned int, unsigned char, unsigned char, unsigned char);
-
-int flamingo_init(int pattern, flamingo_handler_t handler);
+flamingo_config_t *flamingo_default_config();
+int flamingo_init();
 void flamingo_close();
 
 void flamingo_send_FA500(int remote, char channel, int command, int rolling);

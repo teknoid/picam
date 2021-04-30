@@ -17,19 +17,12 @@
 #define P_FLAMINGO32		4
 #define P_FLAMINGO32M		5
 
-#define GPIO_PIN			27	//RPi2 Pin13 GPIO_GEN2
-
-#define BUFFER				0xff
-
-#define STATE_RESET			129 // max 64 bit code -> 128 high/low edges + 1
-
-#define PULSE_COUNTER_MAX	BUFFER * BUFFER
-
 typedef struct rfsniffer_event_t {
 	unsigned short protocol;
 	unsigned long long raw;
 	int device;
 	int channel;
+	int repeat;
 	int key1;
 	int ivalue1;
 	float fvalue1;
@@ -51,6 +44,8 @@ typedef struct rfsniffer_event_t {
 typedef void (*rfsniffer_handler_t)(rfsniffer_event_t *event);
 
 typedef struct rfsniffer_config_t {
+	unsigned char rx;
+	unsigned char tx;
 	unsigned char analyzer_mode;
 	unsigned char realtime_mode;
 	unsigned char timestamp;

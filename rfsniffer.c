@@ -32,6 +32,16 @@
 
 // #define RFSNIFFER_MAIN
 
+#define RX					2
+#define TX					0
+#define GPIO_PIN			27	//RPi2 Pin13 GPIO_GEN2
+
+#define BUFFER				0xff
+
+#define STATE_RESET			129 // max 64 bit code -> 128 high/low edges + 1
+
+#define PULSE_COUNTER_MAX	BUFFER * BUFFER
+
 const static char *CLOW = "LOW\0";
 const static char *CHIGH = "HIGH\0";
 const static char *CEDGE = "EDGE\0";
@@ -450,7 +460,7 @@ static void* realtime_sampler(void *arg) {
 		// sample time + pin state
 		gettimeofday(&tNow, NULL);
 		// pin = bcm2835_gpio_lev(GPIO_PIN);
-		pin = digitalRead(RX);
+		pin = digitalRead(cfg->rx);
 
 		// calculate length of last pulse, store timer value for next calculation
 		pulse = ((tNow.tv_sec * 1000000) + tNow.tv_usec) - ((tLast.tv_sec * 1000000) + tLast.tv_usec);
@@ -886,7 +896,7 @@ static void* stream_sampler(void *arg) {
 		// sample time + pin state
 		gettimeofday(&tNow, NULL);
 		// pin = bcm2835_gpio_lev(GPIO_PIN);
-		pin = digitalRead(RX);
+		pin = digitalRead(cfg->rx);
 
 		// calculate length of last pulse, store timer value for next calculation
 		pulse = ((tNow.tv_sec * 1000000) + tNow.tv_usec) - ((tLast.tv_sec * 1000000) + tLast.tv_usec);
@@ -991,6 +1001,8 @@ rfsniffer_config_t *rfsniffer_default_config() {
 	memset(cfg, 0, sizeof(*cfg));
 
 	// default config
+	cfg->rx = RX;
+	cfg->tx = TX;
 	cfg->analyzer_mode = 0;
 	cfg->realtime_mode = 0;
 	cfg->timestamp = 0;
@@ -1020,7 +1032,6 @@ rfsniffer_config_t *rfsniffer_default_config() {
 }
 
 int rfsniffer_init() {
-
 	if (!cfg->quiet)
 		printf("INIT test 2x 0xdeadbeef = %s\n", printbits64(0xdeadbeefdeadbeef, 0x0101010101010101));
 
@@ -1074,6 +1085,7 @@ int rfsniffer_close() {
 			perror("Error joining thread");
 		}
 	}
+	free(cfg);
 	return 0;
 }
 

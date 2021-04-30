@@ -15,6 +15,8 @@
 #include "flamingo.h"
 #include "frozen.h"
 
+#define BUFFER		128
+
 static rfsniffer_config_t *cfg;
 
 static unsigned long decode_0110(unsigned long long in) {
@@ -108,6 +110,7 @@ static void decode_nexus(unsigned char protocol, unsigned long long raw, unsigne
 		rfsniffer_event_t *e = malloc(sizeof(*e));
 		e->message = cmessage;
 		e->protocol = protocol;
+		e->repeat = repeat;
 		e->raw = raw;
 		e->device = i;
 		e->channel = c;
@@ -121,7 +124,7 @@ static void decode_nexus(unsigned char protocol, unsigned long long raw, unsigne
 	}
 }
 
-static void decode_flamingo28(unsigned char protocol, unsigned long long raw, unsigned char r) {
+static void decode_flamingo28(unsigned char protocol, unsigned long long raw, unsigned char repeat) {
 	unsigned long code;
 	unsigned int xmitter;
 	unsigned char channel, command, payload, rolling;
@@ -147,6 +150,7 @@ static void decode_flamingo28(unsigned char protocol, unsigned long long raw, un
 		rfsniffer_event_t *e = malloc(sizeof(*e));
 		e->message = cmessage;
 		e->protocol = protocol;
+		e->repeat = repeat;
 		e->raw = raw;
 		e->device = xmitter;
 		e->channel = channel;
@@ -160,7 +164,7 @@ static void decode_flamingo28(unsigned char protocol, unsigned long long raw, un
 	}
 }
 
-static void decode_flamingo24(unsigned char protocol, unsigned long long raw, unsigned char r) {
+static void decode_flamingo24(unsigned char protocol, unsigned long long raw, unsigned char repeat) {
 
 	// TODO decode
 
@@ -175,11 +179,12 @@ static void decode_flamingo24(unsigned char protocol, unsigned long long raw, un
 	if (cfg->rfsniffer_handler) {
 		rfsniffer_event_t *e = malloc(sizeof(*e));
 		e->protocol = protocol;
+		e->repeat = repeat;
 		e->raw = raw;
 	}
 }
 
-static void decode_flamingo32(unsigned char protocol, unsigned long long raw, unsigned char r) {
+static void decode_flamingo32(unsigned char protocol, unsigned long long raw, unsigned char repeat) {
 	unsigned long code = decode_0110(raw);
 	if (code == 0)
 		return;
@@ -213,6 +218,7 @@ static void decode_flamingo32(unsigned char protocol, unsigned long long raw, un
 		rfsniffer_event_t *e = malloc(sizeof(*e));
 		e->message = cmessage;
 		e->protocol = protocol;
+		e->repeat = repeat;
 		e->raw = raw;
 		e->device = xmitter;
 		e->channel = channel;
