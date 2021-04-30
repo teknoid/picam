@@ -14,12 +14,13 @@ test -d $WWW || exit
 # make a copy
 cp $WORK/current.jpg $WORK/currentx.jpg
 
-# daily: create image and increment index
+# daily: create image, increment index, create timestamp
 DINDEX=`cat $WORK/d/.index`
 DFILE=$WORK/d/`printf %04d $DINDEX`.jpg
 cp $WORK/current.jpg $DFILE
 DINDEX=`expr $DINDEX + 1`
 echo $DINDEX > $WORK/d/.index
+echo `date +"%d.%m.%Y %X"` >$WORK/.mtime
 
 # weekly: link image once per minute
 W=`expr $DINDEX % 6`

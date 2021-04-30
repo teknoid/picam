@@ -2,12 +2,12 @@
 <?php
 header('Content-Type: application/json');
 
-$image = '/ram/webcam/current.jpg';
+$webcam = '/ram/webcam/';
 $nexus = '/ram/NEXUS/231/0/';
 
-if (file_exists($nexus) && file_exists($image)) {
+if (file_exists($webcam) && file_exists($nexus)) {
     $json = array(
-        'mtime' => date('d.m.Y H:m', filemtime($image)),
+        'mtime' => str_replace(PHP_EOL, '', file_get_contents($webcam . '.mtime')),
         'temp' => 'Temp ' . str_replace(PHP_EOL, '', file_get_contents($nexus . 'temp')) . '°C',
         'humi' => 'Hum ' . str_replace(PHP_EOL, '', file_get_contents($nexus . 'humi')) . '%'
     );
