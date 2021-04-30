@@ -960,17 +960,18 @@ void rfsniffer_stdout_handler(rfsniffer_event_t *e) {
 		printf(e->message);
 	else {
 		// print raw values
-		const char *fmt = "HANDLER Protocol = %d, Raw = 0x%llx, Device = 0x%x, Channel = %d, Event = %d, IValue = 0x%02x FValue=%02f\n";
-		if (e->key1)
-			printf(fmt, e->protocol, e->raw, e->device, e->channel, e->key1, e->ivalue1, e->fvalue1);
-		if (e->key2)
-			printf(fmt, e->protocol, e->raw, e->device, e->channel, e->key2, e->ivalue2, e->fvalue2);
-		if (e->key3)
-			printf(fmt, e->protocol, e->raw, e->device, e->channel, e->key3, e->ivalue3, e->fvalue3);
-		if (e->key4)
-			printf(fmt, e->protocol, e->raw, e->device, e->channel, e->key4, e->ivalue4, e->fvalue4);
-		if (e->key5)
-			printf(fmt, e->protocol, e->raw, e->device, e->channel, e->key5, e->ivalue5, e->fvalue5);
+		const char *fmt1 = "HANDLER Protocol = %d, Raw = 0x%llx, Repeat = %d, Device = 0x%x, Channel = %d, Event = %d, Value = 0x%02x\n";
+		const char *fmt2 = "HANDLER Protocol = %d, Raw = 0x%llx, Repeat = %d, Device = 0x%x, Channel = %d, Event = %d, Value = %02.1f\n";
+		if (e->key)
+			printf(fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->key, e->value);
+		if (e->ikey1)
+			printf(fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey1, e->ivalue1);
+		if (e->ikey2)
+			printf(fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey2, e->ivalue2);
+		if (e->ikey3)
+			printf(fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey3, e->ivalue3);
+		if (e->fkey1)
+			printf(fmt2, e->protocol, e->raw, e->repeat, e->device, e->channel, e->fkey1, e->fvalue1);
 	}
 	free(e);
 }
@@ -981,17 +982,18 @@ void rfsniffer_syslog_handler(rfsniffer_event_t *e) {
 		syslog(LOG_NOTICE, e->message);
 	else {
 		// print raw values
-		const char *fmt = "HANDLER Protocol = %d, Raw = 0x%llx, Device = 0x%x, Channel = %d, Event = %d, IValue = 0x%02x FValue=%02f\n";
-		if (e->key1)
-			syslog(LOG_NOTICE, fmt, e->protocol, e->raw, e->device, e->channel, e->key1, e->ivalue1, e->fvalue1);
-		if (e->key2)
-			syslog(LOG_NOTICE, fmt, e->protocol, e->raw, e->device, e->channel, e->key2, e->ivalue2, e->fvalue2);
-		if (e->key3)
-			syslog(LOG_NOTICE, fmt, e->protocol, e->raw, e->device, e->channel, e->key3, e->ivalue3, e->fvalue3);
-		if (e->key4)
-			syslog(LOG_NOTICE, fmt, e->protocol, e->raw, e->device, e->channel, e->key4, e->ivalue4, e->fvalue4);
-		if (e->key5)
-			syslog(LOG_NOTICE, fmt, e->protocol, e->raw, e->device, e->channel, e->key5, e->ivalue5, e->fvalue5);
+		const char *fmt1 = "HANDLER Protocol = %d, Raw = 0x%llx, Repeat = %d, Device = 0x%x, Channel = %d, Event = %d, Value = 0x%02x\n";
+		const char *fmt2 = "HANDLER Protocol = %d, Raw = 0x%llx, Repeat = %d, Device = 0x%x, Channel = %d, Event = %d, Value = %02.1f\n";
+		if (e->key)
+			syslog(LOG_NOTICE, fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->key, e->value);
+		if (e->ikey1)
+			syslog(LOG_NOTICE, fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey1, e->ivalue1);
+		if (e->ikey2)
+			syslog(LOG_NOTICE, fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey2, e->ivalue2);
+		if (e->ikey3)
+			syslog(LOG_NOTICE, fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey3, e->ivalue3);
+		if (e->fkey1)
+			syslog(LOG_NOTICE, fmt2, e->protocol, e->raw, e->repeat, e->device, e->channel, e->fkey1, e->fvalue1);
 	}
 	free(e);
 }

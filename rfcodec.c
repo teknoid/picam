@@ -53,7 +53,7 @@ static void decode_nexus(unsigned char protocol, unsigned long long raw, unsigne
 	// sensor transmits 10 messages
 	// 1st message get's lost due to sync on pause between repeats
 	// we want at least 3 identical messages
-	if (1 <= repeat && repeat <= 3) {
+	if (1 <= repeat && repeat < 3) {
 		if (cfg->verbose)
 			printf("NEXUS {%d} too few repeats, discard message 0x%08llx = %s\n", repeat, raw, printbits64(raw, 0x1011001101));
 		return;
@@ -114,12 +114,12 @@ static void decode_nexus(unsigned char protocol, unsigned long long raw, unsigne
 		e->raw = raw;
 		e->device = i;
 		e->channel = c;
-		e->key1 = E_TEMPERATURE;
+		e->key = E_BATTERY;
+		e->value = b;
+		e->ikey1 = E_HUMIDITY;
+		e->ivalue1 = h;
+		e->fkey1 = E_TEMPERATURE;
 		e->fvalue1 = t;
-		e->key2 = E_HUMIDITY;
-		e->ivalue2 = h;
-		e->key3 = E_BATTERY;
-		e->ivalue3 = b;
 		(cfg->rfsniffer_handler)(e);
 	}
 }
@@ -154,12 +154,12 @@ static void decode_flamingo28(unsigned char protocol, unsigned long long raw, un
 		e->raw = raw;
 		e->device = xmitter;
 		e->channel = channel;
-		e->key1 = E_BUTTON;
-		e->ivalue1 = command;
-		e->key2 = E_PAYLOAD;
-		e->ivalue2 = payload;
-		e->key3 = E_ROLLING;
-		e->ivalue3 = rolling;
+		e->key = E_BUTTON;
+		e->value = command;
+		e->ikey1 = E_PAYLOAD;
+		e->ivalue1 = payload;
+		e->ikey2 = E_ROLLING;
+		e->ivalue2 = rolling;
 		(cfg->rfsniffer_handler)(e);
 	}
 }
@@ -222,10 +222,10 @@ static void decode_flamingo32(unsigned char protocol, unsigned long long raw, un
 		e->raw = raw;
 		e->device = xmitter;
 		e->channel = channel;
-		e->key1 = E_BUTTON;
-		e->ivalue1 = command;
-		e->key2 = E_PAYLOAD;
-		e->ivalue2 = payload;
+		e->key = E_BUTTON;
+		e->value = command;
+		e->ikey1 = E_PAYLOAD;
+		e->ivalue1 = payload;
 		(cfg->rfsniffer_handler)(e);
 	}
 }

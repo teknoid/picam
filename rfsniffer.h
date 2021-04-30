@@ -23,21 +23,16 @@ typedef struct rfsniffer_event_t {
 	int device;
 	int channel;
 	int repeat;
-	int key1;
+	unsigned char key;
+	int value;
+	unsigned char ikey1;
 	int ivalue1;
-	float fvalue1;
-	int key2;
+	unsigned char ikey2;
 	int ivalue2;
-	float fvalue2;
-	int key3;
+	unsigned char ikey3;
 	int ivalue3;
-	float fvalue3;
-	int key4;
-	int ivalue4;
-	float fvalue4;
-	int key5;
-	int ivalue5;
-	float fvalue5;
+	unsigned char fkey1;
+	float fvalue1;
 	char *message;
 } rfsniffer_event_t;
 
