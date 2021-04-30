@@ -1,7 +1,8 @@
 CFLAGS = -Wall -Wno-unused-function
 LFLAGS = -Wall
 
-LIBS = -lpthread -lrt -lbcm2835 -lwiringPi
+#LIBS = -lpthread -lrt -lbcm2835 -lwiringPi
+LIBS = -lpthread -lrt -lwiringPi
 
 SRCS = $(wildcard *.c)
 OBJS = $(SRCS:.c=.o)

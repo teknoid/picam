@@ -19,10 +19,12 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <poll.h>
+#include <syslog.h>
 #include <sys/mman.h>
 #include <sys/time.h>
 
-#include <bcm2835.h>
+//#include <bcm2835.h>
+#include <wiringPi.h>
 
 #include "rfsniffer.h"
 #include "flamingo.h"
@@ -30,12 +32,10 @@
 
 // #define RFSNIFFER_MAIN
 
-#ifdef RFSNIFFER_MAIN
 const static char *CLOW = "LOW\0";
 const static char *CHIGH = "HIGH\0";
 const static char *CEDGE = "EDGE\0";
 const static char *CNONE = "NONE\0";
-#endif
 
 static pthread_t thread_decoder;
 static void* realtime_decoder(void *arg);
@@ -56,31 +56,9 @@ static unsigned long long matrix[BUFFER][BUFFER];
 static unsigned short lpulse_counter[PULSE_COUNTER_MAX];
 static unsigned short hpulse_counter[PULSE_COUNTER_MAX];
 
-// default configuration
-static unsigned char analyzer_mode = 0;
-static unsigned char realtime_mode = 0;
-static unsigned char timestamp = 0;
-static unsigned char pulse_counter_active = 0;
-static unsigned char decoder_delay = 1;
-static unsigned char bits_to_sample = 32;
-static unsigned char collect_identical_codes = 1;
-static unsigned char sync_on_0 = 1;
-static unsigned char sync_on_1 = 0;
-static unsigned char sample_on_0 = 1;
-static unsigned char sample_on_1 = 0;
-static unsigned long sync_min = 1800;
-static unsigned long sync_max = 2000;
-static unsigned long bitdivider = 1500;
-static unsigned short noise = 100;
-
-unsigned char verbose = 0;
-unsigned char quiet = 0;
-unsigned char json = 0;
-char *sysfslike = 0;
-
-rfsniffer_handler_t rfsniffer_handler;
-
 static unsigned long timestamp_last_code;
+
+static rfsniffer_config_t *cfg;
 
 // Ideen
 
@@ -105,12 +83,6 @@ static unsigned long timestamp_last_code;
 // - timestamp
 
 #ifdef RFSNIFFER_MAIN
-static void rfsniffer_dummy_handler(unsigned short protocol, unsigned long long raw, int device, int channel, int key, int value) {
-	if (!quiet) {
-//		printf("HANDLER Protocol = %d, Raw = 0x%llx, Device = 0x%x, Channel = %d, Event = %d, Value = 0x%02x\n", protocol, raw, device, channel, key, value);
-	}
-}
-
 static int usage() {
 	printf("Usage: rfsniffer -v -q -jX -fX -c -nX -dX -a -r -bX -sX -SX -xX -yX -zX\n");
 	printf("  void  normal mode, sync on known pulses, sample and decode messages\n");
@@ -135,57 +107,61 @@ static int usage() {
 }
 
 static int rfsniffer_main(int argc, char **argv) {
-	if (!bcm2835_init())
+	// if (!bcm2835_init())
+	if (wiringPiSetup() < 0)
 		return -1;
+
+	// initialize a default configuration
+	cfg = rfsniffer_default_config();
 
 	if (argc > 0) {
 		int c, i;
 		while ((c = getopt(argc, argv, "ab:cd:ef:jn:qrs:S:tvx:y:z:")) != -1) {
 			switch (c) {
 			case 'a':
-				analyzer_mode = 1;
+				cfg->analyzer_mode = 1;
 				break;
 			case 'b':
-				bits_to_sample = atoi(optarg);
+				cfg->bits_to_sample = atoi(optarg);
 				break;
 			case 'c':
-				pulse_counter_active = 1;
+				cfg->pulse_counter_active = 1;
 				break;
 			case 'd':
-				decoder_delay = atoi(optarg);
+				cfg->decoder_delay = atoi(optarg);
 				break;
 			case 'e':
-				collect_identical_codes = 0;
+				cfg->collect_identical_codes = 0;
 				break;
 			case 'f':
-				sysfslike = optarg;
+				cfg->sysfslike = optarg;
 				break;
 			case 'j':
-				json = 1;
+				cfg->json = 1;
 				break;
 			case 'n':
-				noise = atoi(optarg);
+				cfg->noise = atoi(optarg);
 				break;
 			case 'q':
-				quiet = 1;
+				cfg->quiet = 1;
 				break;
 			case 'r':
-				realtime_mode = 1;
+				cfg->realtime_mode = 1;
 				break;
 			case 's':
 				i = atoi(optarg);
 				switch (i) {
 				case 0:
-					sync_on_0 = 1;
-					sync_on_1 = 0;
+					cfg->sync_on_0 = 1;
+					cfg->sync_on_1 = 0;
 					break;
 				case 1:
-					sync_on_0 = 0;
-					sync_on_1 = 1;
+					cfg->sync_on_0 = 0;
+					cfg->sync_on_1 = 1;
 					break;
 				case 2:
-					sync_on_0 = 1;
-					sync_on_1 = 1;
+					cfg->sync_on_0 = 1;
+					cfg->sync_on_1 = 1;
 					break;
 				}
 				break;
@@ -193,33 +169,33 @@ static int rfsniffer_main(int argc, char **argv) {
 				i = atoi(optarg);
 				switch (i) {
 				case 0:
-					sample_on_0 = 1;
-					sample_on_1 = 0;
+					cfg->sample_on_0 = 1;
+					cfg->sample_on_1 = 0;
 					break;
 				case 1:
-					sample_on_0 = 0;
-					sample_on_1 = 1;
+					cfg->sample_on_0 = 0;
+					cfg->sample_on_1 = 1;
 					break;
 				case 2:
-					sample_on_0 = 1;
-					sample_on_1 = 1;
+					cfg->sample_on_0 = 1;
+					cfg->sample_on_1 = 1;
 					break;
 				}
 				break;
 			case 't':
-				timestamp = 1; // TODO
+				cfg->timestamp = 1; // TODO
 				break;
 			case 'v':
-				verbose = 1;
+				cfg->verbose = 1;
 				break;
 			case 'x':
-				sync_min = strtoul(optarg, NULL, 0);
+				cfg->sync_min = strtoul(optarg, NULL, 0);
 				break;
 			case 'y':
-				sync_max = strtoul(optarg, NULL, 0);
+				cfg->sync_max = strtoul(optarg, NULL, 0);
 				break;
 			case 'z':
-				bitdivider = strtoul(optarg, NULL, 0);
+				cfg->bitdivider = strtoul(optarg, NULL, 0);
 				break;
 			default:
 				return usage();
@@ -227,7 +203,7 @@ static int rfsniffer_main(int argc, char **argv) {
 		}
 	}
 
-	rfsniffer_init(&rfsniffer_dummy_handler);
+	rfsniffer_init();
 	pause();
 	rfsniffer_close();
 	return 0;
@@ -238,7 +214,7 @@ static void matrix_decode_protocol(unsigned char x) {
 	unsigned long long code;
 	unsigned char repeat, y = 1;
 
-	if (collect_identical_codes) {
+	if (cfg->collect_identical_codes) {
 		// TODO find ALL identical codes, not only when differs
 		code = matrix[x][y];
 		repeat = 0;
@@ -246,17 +222,17 @@ static void matrix_decode_protocol(unsigned char x) {
 			if (code == matrix[x][y])
 				repeat++; // still the same code
 			else {
-				decode(x, code, repeat);
+				rfcodec_decode(x, code, repeat);
 				code = matrix[x][y];
 				repeat = 1; // new code
 			}
 		} while (++y < matrix[x][0]);
 		// all identical or the last one
-		decode(x, code, repeat);
+		rfcodec_decode(x, code, repeat);
 	} else {
 		do {
 			code = matrix[x][y];
-			decode(x, code, 0);
+			rfcodec_decode(x, code, 0);
 		} while (++y < matrix[x][0]);
 	}
 }
@@ -274,7 +250,7 @@ static void matrix_decode() {
 		return;
 
 	// print summary
-	if (verbose) {
+	if (cfg->verbose) {
 		printf("MATRIX ");
 		for (x = 0; x < BUFFER; x++) {
 			y = matrix[x][0];
@@ -327,10 +303,10 @@ static void dump_pulse_counters() {
 	// calculate top ten pulse lengths
 	unsigned long lmax, hmax;
 	unsigned char lmaxi, hmaxi, i;
-	for (i = 0; i < (noise / 10); i++) {
+	for (i = 0; i < (cfg->noise / 10); i++) {
 		lpulse_counter[i] = hpulse_counter[i] = 0;	// ignore noise pulses
 	}
-	printf("\n\nTOP-TEN (noise level = %uµs)\n", noise);
+	printf("\n\nTOP-TEN (noise level = %uµs)\n", cfg->noise);
 	for (int m = 0; m < 10; m++) {
 		hmax = lmax = hmaxi = lmaxi = 0;
 		for (int i = 0; i < BUFFER; i++) {
@@ -359,16 +335,14 @@ static void* realtime_decoder(void *arg) {
 		return (void *) 0;
 	}
 
-#ifdef RFSNIFFER_MAIN
-	if (!quiet)
-		printf("DECODER run every %d seconds, %s\n", decoder_delay, collect_identical_codes ? "collect identical codes" : "process each code separately");
-#endif
+	if (!cfg->quiet)
+		printf("DECODER run every %d seconds, %s\n", cfg->decoder_delay, cfg->collect_identical_codes ? "collect identical codes" : "process each code separately");
 
 	struct timeval tNow;
 	unsigned long age_last_message;
 
 	while (1) {
-		sleep(decoder_delay);
+		sleep(cfg->decoder_delay);
 
 		// repeating transmission: wait until actual message is minimum 500ms old
 		gettimeofday(&tNow, NULL);
@@ -377,14 +351,12 @@ static void* realtime_decoder(void *arg) {
 			msleep(100);
 			gettimeofday(&tNow, NULL);
 			age_last_message = (((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000) - timestamp_last_code;
-#ifdef RFSNIFFER_MAIN
-			if (verbose)
+			if (cfg->verbose)
 				printf("DECODER receiving in progress %lums\n", age_last_message);
-#endif
 		}
 
 		// print pulse counters,  top ten pulse lengths, clear counters
-		if (pulse_counter_active) {
+		if (cfg->pulse_counter_active) {
 			dump_pulse_counters();
 		}
 
@@ -443,32 +415,32 @@ static void* realtime_sampler(void *arg) {
 	matrix_init();
 
 	state = 0;
-	if (analyzer_mode) {
+	if (cfg->analyzer_mode) {
 		state = 254;
 
-#ifdef RFSNIFFER_MAIN
 		const char *csync, *csample;
-		if (sync_on_0 && sync_on_1)
+		if (cfg->sync_on_0 && cfg->sync_on_1)
 			csync = CEDGE;
-		else if (sync_on_0 && !sync_on_1)
+		else if (cfg->sync_on_0 && !cfg->sync_on_1)
 			csync = CLOW;
-		else if (!sync_on_0 && sync_on_1)
+		else if (!cfg->sync_on_0 && cfg->sync_on_1)
 			csync = CHIGH;
 		else
 			csync = CNONE;
 
-		if (sample_on_0 && sample_on_1)
+		if (cfg->sample_on_0 && cfg->sample_on_1)
 			csample = CEDGE;
-		else if (sample_on_0 && !sample_on_1)
+		else if (cfg->sample_on_0 && !cfg->sample_on_1)
 			csample = CLOW;
-		else if (!sample_on_0 && sample_on_1)
+		else if (!cfg->sample_on_0 && cfg->sample_on_1)
 			csample = CHIGH;
 		else
 			csample = CNONE;
 
-		if (verbose)
-			printf("SAMPLER sync on %lu-%luµs %s pulses, sampling %d %s bits, 0/1 divider pulse length %luµs\n", sync_min, sync_max, csync, bits_to_sample, csample, bitdivider);
-#endif
+		if (cfg->verbose) {
+			const char *fmt = "SAMPLER sync on %lu-%luµs %s pulses, sampling %d %s bits, 0/1 divider pulse length %luµs\n";
+			printf(fmt, cfg->sync_min, cfg->sync_max, csync, cfg->bits_to_sample, csample, cfg->bitdivider);
+		}
 	}
 
 	while (1) {
@@ -477,7 +449,8 @@ static void* realtime_sampler(void *arg) {
 
 		// sample time + pin state
 		gettimeofday(&tNow, NULL);
-		pin = bcm2835_gpio_lev(GPIO_PIN);
+		// pin = bcm2835_gpio_lev(GPIO_PIN);
+		pin = digitalRead(RX);
 
 		// calculate length of last pulse, store timer value for next calculation
 		pulse = ((tNow.tv_sec * 1000000) + tNow.tv_usec) - ((tLast.tv_sec * 1000000) + tLast.tv_usec);
@@ -489,12 +462,12 @@ static void* realtime_sampler(void *arg) {
 		read(fdset[0].fd, &dummy, 1);
 
 		// ignore noise & crap
-		if (pulse < noise)
+		if (pulse < cfg->noise)
 			continue;
 		if (pulse > 22222)
 			continue;
 
-		if (analyzer_mode || pulse_counter_active) {
+		if (cfg->analyzer_mode || cfg->pulse_counter_active) {
 
 			// round pulse length to multiples of 10
 			p1 = pulse % 10;
@@ -508,20 +481,16 @@ static void* realtime_sampler(void *arg) {
 				else
 					hpulse_counter[pulse_counter]++;
 			} else {
-#ifdef RFSNIFFER_MAIN
-				if (verbose)
+				if (cfg->verbose)
 					printf("SAMPLER pulse_counter overflow %d\n", pulse_counter);
-#endif
 			}
 
 		} else {
 
 			// error detection
 			if (--state_reset == 0) {
-#ifdef RFSNIFFER_MAIN
-				if (verbose)
+				if (cfg->verbose)
 					printf("SAMPLER sampling on protocol %d aborted\n", state);
-#endif
 				state = P_SYNC;
 				continue;
 			}
@@ -618,18 +587,18 @@ static void* realtime_sampler(void *arg) {
 
 			if (pin) {
 				// LOW pulse
-				if (sync_on_0) {
-					if (sync_min < pulse && pulse < sync_max) {
-						bits = bits_to_sample;
+				if (cfg->sync_on_0) {
+					if (cfg->sync_min < pulse && pulse < cfg->sync_max) {
+						bits = cfg->bits_to_sample;
 						state = P_ANALYZE; // next is analyzer sample mode
 						printf("\nSYN ");
 					}
 				}
 			} else {
 				// HIGH pulse
-				if (sync_on_1) {
-					if (sync_min < pulse && pulse < sync_max) {
-						bits = bits_to_sample;
+				if (cfg->sync_on_1) {
+					if (cfg->sync_min < pulse && pulse < cfg->sync_max) {
+						bits = cfg->bits_to_sample;
 						state = P_ANALYZE; // next is analyzer sample mode
 						printf("\nSYN ");
 					}
@@ -642,8 +611,8 @@ static void* realtime_sampler(void *arg) {
 				if (pin) {
 					// LOW pulse
 					printf("L%02d ", pulse_counter);
-					if (sample_on_0) {
-						if (pulse > bitdivider)
+					if (cfg->sample_on_0) {
+						if (pulse > cfg->bitdivider)
 							code++;
 						if (--bits == 0) {
 							matrix_store(state, code);
@@ -657,8 +626,8 @@ static void* realtime_sampler(void *arg) {
 				} else {
 					// HIGH pulse
 					printf("H%02d ", pulse_counter);
-					if (sample_on_1) {
-						if (pulse > bitdivider)
+					if (cfg->sample_on_1) {
+						if (pulse > cfg->bitdivider)
 							code++;
 						if (--bits == 0) {
 							matrix_store(state, code);
@@ -686,7 +655,7 @@ static void* realtime_sampler(void *arg) {
 //       _              ___
 // 0 = _| |___    1 = _|   |_
 //
-unsigned long long stream_probe_low(unsigned short pos, unsigned char bits, unsigned short divider) {
+static unsigned long long stream_probe_low(unsigned short pos, unsigned char bits, unsigned short divider) {
 	unsigned long long code = 0;
 	unsigned short l, h;
 	for (int i = 0; i < bits; i++) {
@@ -710,7 +679,7 @@ unsigned long long stream_probe_low(unsigned short pos, unsigned char bits, unsi
 //       _   _               _      _
 // 0 = _| |_| |____    1 = _| |____| |_
 //
-unsigned long long stream_probe_high(unsigned short pos, unsigned char bits, unsigned short divider) {
+static unsigned long long stream_probe_high(unsigned short pos, unsigned char bits, unsigned short divider) {
 	unsigned long long code = 0;
 	unsigned short l, h;
 	for (int i = 0; i < bits; i++) {
@@ -753,17 +722,15 @@ static void* stream_decoder(void *arg) {
 		return (void *) 0;
 	}
 
-#ifdef RFSNIFFER_MAIN
-	if (!quiet)
-		printf("DECODER run every %d seconds, %s\n", decoder_delay, collect_identical_codes ? "collect identical codes" : "process each code separately");
-	unsigned short delta, stream_last;
-#endif
+	if (!cfg->quiet)
+		printf("DECODER run every %d seconds, %s\n", cfg->decoder_delay, cfg->collect_identical_codes ? "collect identical codes" : "process each code separately");
 
+	unsigned short delta, stream_last;
 	unsigned short i, l, h, rewind, progress, stream_read = 0;
 	unsigned long long code;
 
 	while (1) {
-		sleep(decoder_delay);
+		sleep(cfg->decoder_delay);
 
 		// wait till we see 8 bits of noise (<50µs)
 		do {
@@ -779,26 +746,22 @@ static void* stream_decoder(void *arg) {
 				rewind++;
 			}
 			if (progress) {
-#ifdef RFSNIFFER_MAIN
-				if (verbose)
+				if (cfg->verbose)
 					printf("DECODER receiving in progress, wait\n");
-#endif
 				msleep(100);
 			}
 		} while (progress);
 
-#ifdef RFSNIFFER_MAIN
 		delta = (stream_write > stream_last) ? stream_write - stream_last : 0xffff - stream_last + stream_write;
-		if (verbose)
+		if (cfg->verbose)
 			printf("DECODER stream [%05u:%04u]\n", stream_write, delta);
-#endif
 
 		do {
 			l = lstream[stream_read];
 			h = hstream[stream_read];
 
 			// update pulse counters: 10th pulse length is the array index
-			if (pulse_counter_active) {
+			if (cfg->pulse_counter_active) {
 				if (l < PULSE_COUNTER_MAX)
 					lpulse_counter[l]++;
 				else
@@ -814,54 +777,52 @@ static void* stream_decoder(void *arg) {
 
 			if (380 < l && l < 400) {
 				// not a real sync - it's the pause between 1st and 2nd message - but 1st message is always blurred
-				if (verbose)
+				if (cfg->verbose)
 					printf("DECODER %u SYNC on NEXUS\n", l);
 				code = stream_probe_low(stream_read, 36, 150);
 				if (code)
 					matrix_store(P_NEXUS, code);
 
 			} else if (T1SMIN < l && l < T1SMAX) {
-				if (verbose)
+				if (cfg->verbose)
 					printf("DECODER %u SYNC on FLAMINGO28\n", l);
 				code = stream_probe_high(stream_read, 28, T1X2);
 				if (code)
 					matrix_store(P_FLAMINGO28, code);
 
 			} else if (T4SMIN < l && l < T4SMAX) {
-				if (verbose)
+				if (cfg->verbose)
 					printf("DECODER %u SYNC on FLAMINGO24\n", l);
 				code = stream_probe_high(stream_read, 24, T1X2);
 				if (code)
 					matrix_store(P_FLAMINGO24, code);
 
 			} else if (T2S1MIN < l && l < T2S1MAX) {
-				if (verbose)
+				if (cfg->verbose)
 					printf("DECODER %u SYNC on FLAMINGO32\n", l);
 				code = stream_probe_low(stream_read, 64, T2Y);
 				if (code)
 					matrix_store(P_FLAMINGO32, code);
 
-			} else if (sync_min < l && l < sync_max) {
-				if (verbose) {
+			} else if (cfg->sync_min < l && l < cfg->sync_max) {
+				if (cfg->verbose) {
 					printf("DECODER %u SYNC on ?, ", l);
 					stream_dump(stream_read, 8);
 				}
-				code = stream_probe_low(stream_read, bits_to_sample, bitdivider);
+				code = stream_probe_low(stream_read, cfg->bits_to_sample, cfg->bitdivider);
 				if (code)
 					matrix_store(P_ANALYZE, code);
-				code = stream_probe_high(stream_read, bits_to_sample, bitdivider);
+				code = stream_probe_high(stream_read, cfg->bits_to_sample, cfg->bitdivider);
 				if (code)
 					matrix_store(P_ANALYZE, code);
 			}
 
 		} while (++stream_read != stream_write); // follow the stream_write position
 
-#ifdef RFSNIFFER_MAIN
 		stream_last = stream_write;
-#endif
 
 		// print pulse counters,  top ten pulse lengths, clear counters
-		if (pulse_counter_active) {
+		if (cfg->pulse_counter_active) {
 			dump_pulse_counters();
 		}
 
@@ -924,7 +885,8 @@ static void* stream_sampler(void *arg) {
 
 		// sample time + pin state
 		gettimeofday(&tNow, NULL);
-		pin = bcm2835_gpio_lev(GPIO_PIN);
+		// pin = bcm2835_gpio_lev(GPIO_PIN);
+		pin = digitalRead(RX);
 
 		// calculate length of last pulse, store timer value for next calculation
 		pulse = ((tNow.tv_sec * 1000000) + tNow.tv_usec) - ((tLast.tv_sec * 1000000) + tLast.tv_usec);
@@ -942,7 +904,7 @@ static void* stream_sampler(void *arg) {
 			lstream[stream_write] = 0;
 
 			// validate
-			if (pulse < noise)
+			if (pulse < cfg->noise)
 				continue;
 			if (pulse > 655360)
 				continue;
@@ -953,7 +915,7 @@ static void* stream_sampler(void *arg) {
 
 			// sample
 			lstream[stream_write] = (unsigned short) p2 / 10;
-			if (sample_on_0)
+			if (cfg->sample_on_0)
 				stream_write++;
 
 		} else {
@@ -963,7 +925,7 @@ static void* stream_sampler(void *arg) {
 			hstream[stream_write] = 0;
 
 			// validate
-			if (pulse < noise)
+			if (pulse < cfg->noise)
 				continue;
 			if (pulse > 655360)
 				continue;
@@ -974,7 +936,7 @@ static void* stream_sampler(void *arg) {
 
 			// sample
 			hstream[stream_write] = (unsigned short) p2 / 10;
-			if (sample_on_1)
+			if (cfg->sample_on_1)
 				stream_write++;
 		}
 	}
@@ -982,29 +944,97 @@ static void* stream_sampler(void *arg) {
 	return (void *) 0;
 }
 
-int rfsniffer_init(rfsniffer_handler_t handler) {
-	rfsniffer_handler = handler;
+void rfsniffer_stdout_handler(rfsniffer_event_t *e) {
+	if (e->message)
+		// print formatted string
+		printf(e->message);
+	else {
+		// print raw values
+		const char *fmt = "HANDLER Protocol = %d, Raw = 0x%llx, Device = 0x%x, Channel = %d, Event = %d, IValue = 0x%02x FValue=%02f\n";
+		if (e->key1)
+			printf(fmt, e->protocol, e->raw, e->device, e->channel, e->key1, e->ivalue1, e->fvalue1);
+		if (e->key2)
+			printf(fmt, e->protocol, e->raw, e->device, e->channel, e->key2, e->ivalue2, e->fvalue2);
+		if (e->key3)
+			printf(fmt, e->protocol, e->raw, e->device, e->channel, e->key3, e->ivalue3, e->fvalue3);
+		if (e->key4)
+			printf(fmt, e->protocol, e->raw, e->device, e->channel, e->key4, e->ivalue4, e->fvalue4);
+		if (e->key5)
+			printf(fmt, e->protocol, e->raw, e->device, e->channel, e->key5, e->ivalue5, e->fvalue5);
+	}
+	free(e);
+}
 
-#ifdef RFSNIFFER_MAIN
-	if (!quiet)
+void rfsniffer_syslog_handler(rfsniffer_event_t *e) {
+	if (e->message)
+		// print formatted string
+		syslog(LOG_NOTICE, e->message);
+	else {
+		// print raw values
+		const char *fmt = "HANDLER Protocol = %d, Raw = 0x%llx, Device = 0x%x, Channel = %d, Event = %d, IValue = 0x%02x FValue=%02f\n";
+		if (e->key1)
+			syslog(LOG_NOTICE, fmt, e->protocol, e->raw, e->device, e->channel, e->key1, e->ivalue1, e->fvalue1);
+		if (e->key2)
+			syslog(LOG_NOTICE, fmt, e->protocol, e->raw, e->device, e->channel, e->key2, e->ivalue2, e->fvalue2);
+		if (e->key3)
+			syslog(LOG_NOTICE, fmt, e->protocol, e->raw, e->device, e->channel, e->key3, e->ivalue3, e->fvalue3);
+		if (e->key4)
+			syslog(LOG_NOTICE, fmt, e->protocol, e->raw, e->device, e->channel, e->key4, e->ivalue4, e->fvalue4);
+		if (e->key5)
+			syslog(LOG_NOTICE, fmt, e->protocol, e->raw, e->device, e->channel, e->key5, e->ivalue5, e->fvalue5);
+	}
+	free(e);
+}
+
+rfsniffer_config_t *rfsniffer_default_config() {
+	cfg = malloc(sizeof(*cfg));
+	memset(cfg, 0, sizeof(*cfg));
+
+	// default config
+	cfg->analyzer_mode = 0;
+	cfg->realtime_mode = 0;
+	cfg->timestamp = 0;
+	cfg->pulse_counter_active = 0;
+	cfg->decoder_delay = 1;
+	cfg->bits_to_sample = 32;
+	cfg->collect_identical_codes = 1;
+	cfg->sync_on_0 = 1;
+	cfg->sync_on_1 = 0;
+	cfg->sample_on_0 = 1;
+	cfg->sample_on_1 = 0;
+	cfg->sync_min = 1800;
+	cfg->sync_max = 2000;
+	cfg->bitdivider = 1500;
+	cfg->noise = 100;
+	cfg->verbose = 0;
+	cfg->quiet = 0;
+	cfg->syslog = 0;
+	cfg->json = 0;
+	cfg->sysfslike = 0;
+	cfg->rfsniffer_handler = &rfsniffer_stdout_handler;
+
+	// hand-over to rfcodec module
+	rfcodec_set_config(cfg);
+
+	return cfg;
+}
+
+int rfsniffer_init() {
+
+	if (!cfg->quiet)
 		printf("INIT test 2x 0xdeadbeef = %s\n", printbits64(0xdeadbeefdeadbeef, 0x0101010101010101));
-#endif
 
 	void *sampler, *decoder;
-	if (realtime_mode) {
+	if (cfg->realtime_mode) {
 		sampler = &realtime_sampler;
 		decoder = &realtime_decoder;
-#ifdef RFSNIFFER_MAIN
-		if (!quiet)
+		if (!cfg->quiet)
 			printf("INIT using realtime_sampler and realtime_decoder\n");
-#endif
 	} else {
 		sampler = &stream_sampler;
 		decoder = &stream_decoder;
-#ifdef RFSNIFFER_MAIN
-		if (!quiet)
+		if (!cfg->quiet)
 			printf("INIT using stream_sampler and stream_decoder\n");
-#endif
 	}
 
 	// decoder thread
@@ -1012,20 +1042,16 @@ int rfsniffer_init(rfsniffer_handler_t handler) {
 		perror("Error creating decoder thread");
 		return -1;
 	}
-#ifdef RFSNIFFER_MAIN
-	if (!quiet)
+	if (!cfg->quiet)
 		printf("INIT started decoder thread\n");
-#endif
 
 	// sampler thread
 	if (pthread_create(&thread_sampler, NULL, sampler, NULL)) {
 		perror("Error creating sampler thread");
 		return -1;
 	}
-#ifdef RFSNIFFER_MAIN
-	if (!quiet)
+	if (!cfg->quiet)
 		printf("INIT started sampler thread\n");
-#endif
 
 	return 0;
 }

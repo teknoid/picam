@@ -13,10 +13,14 @@
 #include "webcam.h"
 #include "xmas.h"
 #include "flamingo.h"
-#include "rfcodec.h"
 #include "rfsniffer.h"
 
-mcp_config_t *cfg;
+typedef struct mcp_config_t {
+	int daemonize;
+	rfsniffer_config_t *rfconfig;
+} mcp_config_t;
+
+static mcp_config_t *cfg;
 
 static void sig_handler(int signo) {
 	syslog(LOG_NOTICE, "MCP received signal %d", signo);
@@ -78,7 +82,11 @@ static void mcp_init() {
 		exit(EXIT_FAILURE);
 	}
 
-	if (rfsniffer_init(NULL) < 0) {
+	cfg->rfconfig = rfsniffer_default_config();
+	cfg->rfconfig->rfsniffer_handler = &rfsniffer_syslog_handler;
+	cfg->rfconfig->quiet = 1;
+	cfg->rfconfig->realtime_mode = 1;
+	if (rfsniffer_init() < 0) {
 		exit(EXIT_FAILURE);
 	}
 

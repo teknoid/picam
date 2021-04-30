@@ -10,21 +10,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "rfcodec.h"
+#include "rfsniffer.h"
 #include "utils.h"
 #include "flamingo.h"
 #include "frozen.h"
 
-#define BUFFER	128
-
-// #define RFSNIFFER_MAIN
-
-extern rfsniffer_handler_t rfsniffer_handler;
-
-extern unsigned char verbose;
-extern unsigned char quiet;
-extern unsigned char json;
-extern char *sysfslike;
+static rfsniffer_config_t *cfg;
 
 static unsigned long decode_0110(unsigned long long in) {
 	unsigned long long shift;
@@ -44,10 +35,8 @@ static unsigned long decode_0110(unsigned long long in) {
 		} else if (shift == bit1) {
 			out += 1;
 		} else {
-#ifdef RFSNIFFER_MAIN
-			if (verbose)
+			if (cfg->verbose)
 				printf("0110 decode error %s\n", printbits64(in, 0x0001000100010001));
-#endif
 			return 0;
 		}
 		count -= 2;
@@ -63,18 +52,14 @@ static void decode_nexus(unsigned char protocol, unsigned long long raw, unsigne
 	// 1st message get's lost due to sync on pause between repeats
 	// we want at least 3 identical messages
 	if (1 <= repeat && repeat <= 3) {
-#ifdef RFSNIFFER_MAIN
-		if (verbose)
+		if (cfg->verbose)
 			printf("NEXUS {%d} too few repeats, discard message 0x%08llx = %s\n", repeat, raw, printbits64(raw, 0x1011001101));
-#endif
 		return;
 	}
 
 	if ((raw & 0x0f00) != 0x0f00) {
-#ifdef RFSNIFFER_MAIN
-		if (verbose)
+		if (cfg->verbose)
 			printf("NEXUS message verification failed 0x%08llx = %s\n", raw, printbits64(raw, 0x1011001101));
-#endif
 		return;
 	}
 
@@ -98,47 +83,58 @@ static void decode_nexus(unsigned char protocol, unsigned long long raw, unsigne
 	// TODO timestamp via utils
 
 	// create strings
-	char craw[12], ctemp[6], chumi[3], cbatt[2];
+	char cmessage[BUFFER], craw[12], ctemp[6], chumi[3], cbatt[2];
 	snprintf(craw, 12, "0x%08llx", raw);
 	snprintf(ctemp, 6, "%02.1f", t);
 	snprintf(chumi, 3, "%u", h);
 	snprintf(cbatt, 2, "%u", b);
+	const char *fmt_message = "NEXUS {%d} 0x%08llx Id = %d, Channel = %d, Battery = %s, Temp = %02.1fC, Hum = %d%%\n";
+	snprintf(cmessage, BUFFER, fmt_message, repeat, raw, i, c, b ? "OK" : "LOW", t, h);
 
-	if (json) {
-		char format[BUFFER];
+	if (cfg->json) {
 		struct json_out jout = JSON_OUT_FILE(stdout);
-		snprintf(format, BUFFER, "%s", "{ %Q:%Q, %Q:%Q, %Q:%d, %Q:%d, %Q:%d, %Q:%d, %Q:%Q, %Q:%d }\n");
-		json_printf(&jout, format, "type", "NEXUS", "raw", craw, "repeat", repeat, "id", i, "channel", c, "battery", b, "temp", ctemp, "humi", h);
+		const char *fmt_json = "{ %Q:%Q, %Q:%Q, %Q:%d, %Q:%d, %Q:%d, %Q:%d, %Q:%Q, %Q:%d }\n";
+		json_printf(&jout, fmt_json, "type", "NEXUS", "raw", craw, "repeat", repeat, "id", i, "channel", c, "battery", b, "temp", ctemp, "humi", h);
 	}
 
-	if (sysfslike) {
+	if (cfg->sysfslike) {
 		// e.g. creates file entries like /tmp/NEXUS/231/0/temp
-		create_sysfslike(sysfslike, "temp", ctemp, "%s%d%d", "NEXUS", i, c);
-		create_sysfslike(sysfslike, "humi", chumi, "%s%d%d", "NEXUS", i, c);
-		create_sysfslike(sysfslike, "batt", cbatt, "%s%d%d", "NEXUS", i, c);
+		create_sysfslike(cfg->sysfslike, "temp", ctemp, "%s%d%d", "NEXUS", i, c);
+		create_sysfslike(cfg->sysfslike, "humi", chumi, "%s%d%d", "NEXUS", i, c);
+		create_sysfslike(cfg->sysfslike, "batt", cbatt, "%s%d%d", "NEXUS", i, c);
 	}
 
-	if (rfsniffer_handler) {
-		(rfsniffer_handler)(protocol, raw, i, c, E_TEMPERATURE, t_raw);
-		(rfsniffer_handler)(protocol, raw, i, c, E_HUMIDITY, h);
-		(rfsniffer_handler)(protocol, raw, i, c, E_BATTERY, b);
+	if (cfg->rfsniffer_handler) {
+		rfsniffer_event_t *e = malloc(sizeof(*e));
+		e->message = cmessage;
+		e->protocol = protocol;
+		e->raw = raw;
+		e->device = i;
+		e->channel = c;
+		e->key1 = E_TEMPERATURE;
+		e->fvalue1 = t;
+		e->key2 = E_HUMIDITY;
+		e->ivalue2 = h;
+		e->key3 = E_BATTERY;
+		e->ivalue3 = b;
+		(cfg->rfsniffer_handler)(e);
 	}
-
-#ifdef RFSNIFFER_MAIN
-	if (!quiet)
-		printf("NEXUS {%d} 0x%08llx Id = %d, Channel = %d, Battery = %s, Temp = %02.1fC, Hum = %d%%\n", repeat, raw, i, c, b ? "OK" : "LOW", t, h);
-#endif
 }
 
 static void decode_flamingo28(unsigned char protocol, unsigned long long raw, unsigned char r) {
-	unsigned long message;
+	unsigned long code;
 	unsigned int xmitter;
 	unsigned char channel, command, payload, rolling;
 
-	message = decrypt(raw);
-	decode_FA500(message, &xmitter, &channel, &command, &payload, &rolling);
+	code = decrypt(raw);
+	decode_FA500(code, &xmitter, &channel, &command, &payload, &rolling);
 
-	if (json) {
+	// create strings
+	char cmessage[BUFFER];
+	const char *fmt_message = "FLAMINGO28 0x%08llx Id = 0x%x, Channel = %d, Command = %d, Payload = 0x%02x, Rolling = %d\n";
+	snprintf(cmessage, BUFFER, fmt_message, raw, xmitter, channel, command, payload, rolling);
+
+	if (cfg->json) {
 		char format[BUFFER], craw[12], cid[12];
 		snprintf(craw, 12, "0x%08llx", raw);
 		snprintf(cid, 12, "0x%04x", xmitter);
@@ -147,22 +143,28 @@ static void decode_flamingo28(unsigned char protocol, unsigned long long raw, un
 		json_printf(&jout, format, "type", "FLAMINGO28", "raw", craw, "id", cid, "channel", channel, "command", command, "payload", payload, "rolling", rolling);
 	}
 
-	if (rfsniffer_handler) {
-		(rfsniffer_handler)(protocol, raw, xmitter, channel, E_BUTTON, command);
-		(rfsniffer_handler)(protocol, raw, xmitter, channel, E_PAYLOAD, payload);
+	if (cfg->rfsniffer_handler) {
+		rfsniffer_event_t *e = malloc(sizeof(*e));
+		e->message = cmessage;
+		e->protocol = protocol;
+		e->raw = raw;
+		e->device = xmitter;
+		e->channel = channel;
+		e->key1 = E_BUTTON;
+		e->ivalue1 = command;
+		e->key2 = E_PAYLOAD;
+		e->ivalue2 = payload;
+		e->key3 = E_ROLLING;
+		e->ivalue3 = rolling;
+		(cfg->rfsniffer_handler)(e);
 	}
-
-#ifdef RFSNIFFER_MAIN
-	if (!quiet)
-		printf("FLAMINGO28 0x%08llx Id = 0x%x, Channel = %d, Command = %d, Payload = 0x%02x, Rolling = %d\n", raw, xmitter, channel, command, payload, rolling);
-#endif
 }
 
 static void decode_flamingo24(unsigned char protocol, unsigned long long raw, unsigned char r) {
 
 	// TODO decode
 
-	if (json) {
+	if (cfg->json) {
 		char format[BUFFER], craw[12];
 		snprintf(craw, 12, "0x%08llx", raw);
 		struct json_out jout = JSON_OUT_FILE(stdout);
@@ -170,10 +172,11 @@ static void decode_flamingo24(unsigned char protocol, unsigned long long raw, un
 		json_printf(&jout, format, "type", "FLAMINGO24", "raw", craw);
 	}
 
-#ifdef RFSNIFFER_MAIN
-	if (!quiet)
-		printf("FLAMINGO24 0x%08llx %s\n", raw, printbits(raw, 0x01010101));
-#endif
+	if (cfg->rfsniffer_handler) {
+		rfsniffer_event_t *e = malloc(sizeof(*e));
+		e->protocol = protocol;
+		e->raw = raw;
+	}
 }
 
 static void decode_flamingo32(unsigned char protocol, unsigned long long raw, unsigned char r) {
@@ -192,7 +195,12 @@ static void decode_flamingo32(unsigned char protocol, unsigned long long raw, un
 	code >>= 16; // xmitter
 	payload = code & 0xff;
 
-	if (json) {
+	// create strings
+	char cmessage[BUFFER];
+	const char *fmt_message = "FLAMINGO32 0x%08llx Id = 0x%x, Channel = %d, Command = %d, Payload = 0x%02x\n";
+	snprintf(cmessage, BUFFER, fmt_message, raw, xmitter, channel, command, payload);
+
+	if (cfg->json) {
 		char format[BUFFER], craw[12], cid[12];
 		snprintf(craw, 12, "0x%04lx", code_save);
 		snprintf(cid, 12, "0x%04x", xmitter);
@@ -201,27 +209,30 @@ static void decode_flamingo32(unsigned char protocol, unsigned long long raw, un
 		json_printf(&jout, format, "type", "FLAMINGO32", "raw", craw, "id", cid, "channel", channel, "command", command, "payload", payload);
 	}
 
-	if (rfsniffer_handler) {
-		(rfsniffer_handler)(protocol, code_save, xmitter, channel, E_BUTTON, command);
-		(rfsniffer_handler)(protocol, code_save, xmitter, channel, E_PAYLOAD, payload);
+	if (cfg->rfsniffer_handler) {
+		rfsniffer_event_t *e = malloc(sizeof(*e));
+		e->message = cmessage;
+		e->protocol = protocol;
+		e->raw = raw;
+		e->device = xmitter;
+		e->channel = channel;
+		e->key1 = E_BUTTON;
+		e->ivalue1 = command;
+		e->key2 = E_PAYLOAD;
+		e->ivalue2 = payload;
+		(cfg->rfsniffer_handler)(e);
 	}
-
-#ifdef RFSNIFFER_MAIN
-	if (!quiet)
-		printf("FLAMINGO32 0x%04lx Id = 0x%x, Channel = %d, Command = %d, Payload = 0x%02x\n", code_save, xmitter, channel, command, payload);
-#endif
 }
 
 static void decode_anaylzer(unsigned char protocol, unsigned long long raw, unsigned char r) {
-	printf("ANALYZER 0x%08llx %s\n", raw, printbits64(raw, 0x0101010101010101));
+	if (!cfg->quiet)
+		printf("ANALYZER 0x%08llx %s\n", raw, printbits64(raw, 0x0101010101010101));
 }
 
-void decode(unsigned char protocol, unsigned long long code, unsigned char repeat) {
+void rfcodec_decode(unsigned char protocol, unsigned long long code, unsigned char repeat) {
 	if (!code) {
-#ifdef RFSNIFFER_MAIN
-		if (verbose)
+		if (cfg->verbose)
 			printf("DECODE received empty message\n");
-#endif
 		return;
 	}
 
@@ -238,6 +249,11 @@ void decode(unsigned char protocol, unsigned long long code, unsigned char repea
 	case P_ANALYZE:
 		return decode_anaylzer(protocol, code, repeat);
 	default:
-		printf("DECODE no decoder configured for protocol %d 0x%0llx\n", protocol, code);
+		if (!cfg->quiet)
+			printf("DECODE no decoder configured for protocol %d 0x%0llx\n", protocol, code);
 	}
+}
+
+void rfcodec_set_config(rfsniffer_config_t *master_cfg) {
+	cfg = master_cfg;
 }
