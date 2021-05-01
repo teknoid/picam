@@ -7,15 +7,16 @@
 #define E_BATTERY			5
 
 // Protocols
-#define P_SYNC				0
-#define P_ANALYZE			255
-#define P_ANALYZE_SYNC		254
-
 #define P_NEXUS				1
 #define P_FLAMINGO28		2
 #define P_FLAMINGO24		3
 #define P_FLAMINGO32		4
 #define P_FLAMINGO32M		5
+#define P_ANALYZE			255
+
+typedef struct rfsniffer_protocol_t {
+
+} rfsniffer_protocol_t;
 
 typedef struct rfsniffer_event_t {
 	unsigned short protocol;

@@ -414,9 +414,10 @@ static void* realtime_sampler(void *arg) {
 
 	struct timeval tNow, tLast;
 	unsigned long long code;
-	unsigned long pulse, p1, p2;
+	unsigned long pulse, divider, p1, p2;
 	unsigned int pulse_counter;
-	unsigned char state, state_reset, bits, pin, dummy;
+	unsigned char protocol, state_reset, bits, pin, dummy;
+	short state;
 
 	// initialize tLast for correct 1st pulse calculation
 	gettimeofday(&tLast, NULL);
@@ -424,9 +425,9 @@ static void* realtime_sampler(void *arg) {
 	// initialize the matrix
 	matrix_init();
 
-	state = 0;
+	state = -1;
 	if (cfg->analyzer_mode) {
-		state = 254;
+		state = -2;
 
 		const char *csync, *csample;
 		if (cfg->sync_on_0 && cfg->sync_on_1)
@@ -490,25 +491,23 @@ static void* realtime_sampler(void *arg) {
 					lpulse_counter[pulse_counter]++;
 				else
 					hpulse_counter[pulse_counter]++;
-			} else {
-				if (cfg->verbose)
-					printf("SAMPLER pulse_counter overflow %d\n", pulse_counter);
-			}
+			} else if (cfg->verbose)
+				printf("SAMPLER pulse_counter overflow %d\n", pulse_counter);
 
 		} else {
 
 			// error detection
 			if (--state_reset == 0) {
+				state = -1;
 				if (cfg->verbose)
 					printf("SAMPLER sampling on protocol %d aborted\n", state);
-				state = P_SYNC;
 				continue;
 			}
 		}
 
 		switch (state) {
 
-		case P_SYNC: // initial state: detect known SYNC pulses and define next sampling state
+		case -1: // initial state: detect known SYNC pulses and define next sampling state
 			code = 0;
 			state_reset = STATE_RESET;
 
@@ -516,107 +515,84 @@ static void* realtime_sampler(void *arg) {
 				// LOW sync pulses
 				if (3800 < pulse && pulse < 4000) {
 					// not a real sync - it's the pause between 1st and 2nd message
+					protocol = P_NEXUS;
 					bits = 36;
-					state = P_NEXUS;
+					state = 1; // LOW pulses
+					divider = 1500;
 				} else if (T1SMIN < pulse && pulse < T1SMAX) {
+					protocol = P_FLAMINGO28;
 					bits = 28;
-					state = P_FLAMINGO28;
+					state = 0; // HIGH pulses
+					divider = T1X2;
 				} else if (T4SMIN < pulse && pulse < T4SMAX) {
 					bits = 24;
-					state = P_FLAMINGO24;
+					protocol = P_FLAMINGO24;
+					state = 0; // HIGH pulses
+					divider = T1X2;
 				} else if (T2S1MIN < pulse && pulse < T2S1MAX) {
 					bits = 64;
-					state = P_FLAMINGO32;
+					protocol = P_FLAMINGO32;
+					state = 1; // LOW pulses
+					divider = T2Y;
 				}
 			} else {
 				// HIGH sync pulses
 			}
 			break;
 
-		case P_NEXUS: // nexus - sample LOW pulses
-			if (bits && pin) {
-				if (pulse > 1500)
-					code++;
-
-				if (--bits == 0) {
-					matrix_store(state, code);
-					timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
-					state = P_SYNC;
-				} else {
-					code <<= 1;
+		case 1: // sample LOW pulses
+			if (bits)
+				if (pin) {
+					if (pulse > divider)
+						code++;
+					if (--bits == 0) {
+						matrix_store(protocol, code);
+						timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
+						state = -1;
+					} else
+						code <<= 1;
 				}
-			}
 			break;
 
-		case P_FLAMINGO28: // flamingo 28bit - sample HIGH pulses
-			if (bits && !pin) {
-				if (pulse > T1X2)
-					code++;
-
-				if (--bits == 0) {
-					matrix_store(state, code);
-					timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
-					state = P_SYNC;
-				} else {
-					code <<= 1;
+		case 0: // sample HIGH pulses
+			if (bits)
+				if (!pin) {
+					if (pulse > divider)
+						code++;
+					if (--bits == 0) {
+						matrix_store(protocol, code);
+						timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
+						state = -1;
+					} else
+						code <<= 1;
 				}
-			}
 			break;
 
-		case P_FLAMINGO24: // flamingo 24bit - sample HIGH pulses
-			if (bits && !pin) {
-				if (pulse > T1X2)
-					code++;
-
-				if (--bits == 0) {
-					matrix_store(state, code);
-					timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
-					state = P_SYNC;
-				} else {
-					code <<= 1;
-				}
-			}
-			break;
-
-		case P_FLAMINGO32: // flamingo 32bit - sample LOW pulses
-			if (bits && pin) {
-				code += pulse < T2Y ? 0 : 1;
-				if (--bits == 0) {
-					matrix_store(state, code);
-					timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
-					state = P_SYNC;
-				} else {
-					code <<= 1;
-				}
-			}
-			break;
-
-		case P_ANALYZE_SYNC: // analyzer sync mode: find the SYNC pulse
+		case -2: // analyzer sync mode: find the SYNC pulse
 			code = 0;
 			state_reset = STATE_RESET;
 
 			if (pin) {
 				// LOW pulse
-				if (cfg->sync_on_0) {
+				if (cfg->sync_on_0)
 					if (cfg->sync_min < pulse && pulse < cfg->sync_max) {
 						bits = cfg->bits_to_sample;
-						state = P_ANALYZE; // next is analyzer sample mode
+						state = 127; // next is analyzer sample mode
 						printf("\nSYN ");
 					}
-				}
+
 			} else {
 				// HIGH pulse
-				if (cfg->sync_on_1) {
+				if (cfg->sync_on_1)
 					if (cfg->sync_min < pulse && pulse < cfg->sync_max) {
 						bits = cfg->bits_to_sample;
-						state = P_ANALYZE; // next is analyzer sample mode
+						state = 127; // next is analyzer sample mode
 						printf("\nSYN ");
 					}
-				}
 			}
 			break;
 
-		case P_ANALYZE: // analyzer sample mode: sample bits and print
+		case 127: // analyzer sample mode: sample bits and print
 			if (bits) {
 				if (pin) {
 					// LOW pulse
@@ -625,13 +601,12 @@ static void* realtime_sampler(void *arg) {
 						if (pulse > cfg->bitdivider)
 							code++;
 						if (--bits == 0) {
-							matrix_store(state, code);
+							matrix_store(P_ANALYZE, code);
 							timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
-							state = P_ANALYZE_SYNC; // back to analyzer sync mode
+							state = -2; // back to analyzer sync mode
 							printf("\n");
-						} else {
+						} else
 							code <<= 1;
-						}
 					}
 				} else {
 					// HIGH pulse
@@ -640,13 +615,12 @@ static void* realtime_sampler(void *arg) {
 						if (pulse > cfg->bitdivider)
 							code++;
 						if (--bits == 0) {
-							matrix_store(state, code);
+							matrix_store(P_ANALYZE, code);
 							timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
-							state = P_ANALYZE_SYNC; // back to analyzer sync mode
+							state = -2; // back to analyzer sync mode
 							printf("\n");
-						} else {
+						} else
 							code <<= 1;
-						}
 					}
 				}
 			}
@@ -654,7 +628,7 @@ static void* realtime_sampler(void *arg) {
 
 		default:
 			printf("illegal state %d\n", state);
-			state = P_SYNC;
+			state = -1;
 		}
 	}
 	return (void *) 0;
@@ -736,7 +710,9 @@ static void* stream_decoder(void *arg) {
 		printf("DECODER run every %d seconds, %s\n", cfg->decoder_delay, cfg->collect_identical_codes ? "collect identical codes" : "process each code separately");
 
 	unsigned short delta, stream_last;
-	unsigned short i, l, h, rewind, progress, stream_read = 0;
+	unsigned short i, lshort, hshort, rewind, progress, stream_read = 0;
+	unsigned long l;
+	// unsigned long h;
 	unsigned long long code;
 
 	while (1) {
@@ -748,9 +724,9 @@ static void* stream_decoder(void *arg) {
 			rewind = stream_rewind(stream_write, 8);
 			// stream_dump(rewind, 8);
 			for (i = 0; i < 8; i++) {
-				l = lstream[rewind];
-				h = hstream[rewind];
-				if (l && h && (l > 50 || h > 50)) {
+				lshort = lstream[rewind];
+				hshort = hstream[rewind];
+				if (lshort && hshort && (lshort > 5 || hshort > 5)) {
 					progress = 1;
 				}
 				rewind++;
@@ -767,56 +743,56 @@ static void* stream_decoder(void *arg) {
 			printf("DECODER stream [%05u:%04u]\n", stream_write, delta);
 
 		do {
-			l = lstream[stream_read];
-			h = hstream[stream_read];
 
 			// update pulse counters: 10th pulse length is the array index
 			if (cfg->pulse_counter_active) {
-				if (l < PULSE_COUNTER_MAX)
-					lpulse_counter[l]++;
+				lshort = lstream[stream_read];
+				hshort = hstream[stream_read];
+				if (lshort < PULSE_COUNTER_MAX)
+					lpulse_counter[lshort]++;
 				else
-					printf("SAMPLER LOW pulse_counter overflow %d\n", l);
+					printf("SAMPLER LOW pulse_counter overflow %d\n", lshort);
 
-				if (h < PULSE_COUNTER_MAX)
-					hpulse_counter[h]++;
+				if (hshort < PULSE_COUNTER_MAX)
+					hpulse_counter[hshort]++;
 				else
-					printf("SAMPLER HIGH pulse_counter overflow %d\n", h);
+					printf("SAMPLER HIGH pulse_counter overflow %d\n", hshort);
 			}
 
-			// TODO T1SMIN stimmt jetzt nocht mehr -> 10x
-
-			if (380 < l && l < 400) {
+			l = lstream[stream_read] * 10;
+			// h = hstream[stream_read] * 10;
+			if (3800 < l && l < 4000) {
 				// not a real sync - it's the pause between 1st and 2nd message - but 1st message is always blurred
 				if (cfg->verbose)
-					printf("DECODER %u SYNC on NEXUS\n", l);
+					printf("DECODER %lu SYNC on NEXUS\n", l);
 				code = stream_probe_low(stream_read, 36, 150);
 				if (code)
 					matrix_store(P_NEXUS, code);
 
 			} else if (T1SMIN < l && l < T1SMAX) {
 				if (cfg->verbose)
-					printf("DECODER %u SYNC on FLAMINGO28\n", l);
+					printf("DECODER %lu SYNC on FLAMINGO28\n", l);
 				code = stream_probe_high(stream_read, 28, T1X2);
 				if (code)
 					matrix_store(P_FLAMINGO28, code);
 
 			} else if (T4SMIN < l && l < T4SMAX) {
 				if (cfg->verbose)
-					printf("DECODER %u SYNC on FLAMINGO24\n", l);
+					printf("DECODER %lu SYNC on FLAMINGO24\n", l);
 				code = stream_probe_high(stream_read, 24, T1X2);
 				if (code)
 					matrix_store(P_FLAMINGO24, code);
 
 			} else if (T2S1MIN < l && l < T2S1MAX) {
 				if (cfg->verbose)
-					printf("DECODER %u SYNC on FLAMINGO32\n", l);
+					printf("DECODER %lu SYNC on FLAMINGO32\n", l);
 				code = stream_probe_low(stream_read, 64, T2Y);
 				if (code)
 					matrix_store(P_FLAMINGO32, code);
 
 			} else if (cfg->sync_min < l && l < cfg->sync_max) {
 				if (cfg->verbose) {
-					printf("DECODER %u SYNC on ?, ", l);
+					printf("DECODER %lu SYNC on ?, ", l);
 					stream_dump(stream_read, 8);
 				}
 				code = stream_probe_low(stream_read, cfg->bits_to_sample, cfg->bitdivider);
@@ -828,13 +804,11 @@ static void* stream_decoder(void *arg) {
 			}
 
 		} while (++stream_read != stream_write); // follow the stream_write position
-
 		stream_last = stream_write;
 
 		// print pulse counters,  top ten pulse lengths, clear counters
-		if (cfg->pulse_counter_active) {
+		if (cfg->pulse_counter_active)
 			dump_pulse_counters();
-		}
 
 		matrix_decode();
 	}

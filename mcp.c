@@ -69,6 +69,7 @@ static void mcp_init() {
 	cfg->rfsniffercfg->quiet = 1;
 	cfg->rfsniffercfg->sysfslike = "/ram";
 	cfg->rfsniffercfg->realtime_mode = 1;
+	cfg->rfsniffercfg->noise = 300;
 	if (rfsniffer_init() < 0) {
 		exit(EXIT_FAILURE);
 	}

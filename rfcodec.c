@@ -132,6 +132,8 @@ static void decode_flamingo28(unsigned char protocol, unsigned long long raw, un
 	code = decrypt(raw);
 	decode_FA500(code, &xmitter, &channel, &command, &payload, &rolling);
 
+	// TODO validate against xmitters
+
 	// create strings
 	char cmessage[BUFFER];
 	const char *fmt_message = "FLAMINGO28 0x%08llx Id = 0x%x, Channel = %d, Command = %d, Payload = 0x%02x, Rolling = %d\n";
@@ -199,6 +201,8 @@ static void decode_flamingo32(unsigned char protocol, unsigned long long raw, un
 	xmitter = code & 0xffff;
 	code >>= 16; // xmitter
 	payload = code & 0xff;
+
+	// TODO validate against xmitters
 
 	// create strings
 	char cmessage[BUFFER];
