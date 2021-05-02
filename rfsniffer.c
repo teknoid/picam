@@ -119,11 +119,11 @@ static int usage() {
 static int rfsniffer_main(int argc, char **argv) {
 	// if (!bcm2835_init())
 	if (wiringPiSetup() < 0)
-	return -1;
+		return -1;
 
 	// gain RT
 	if (elevate_realtime(3) < 0)
-	return -2;
+		return -2;
 
 	// initialize a default configuration
 	cfg = rfsniffer_default_config();
@@ -132,86 +132,86 @@ static int rfsniffer_main(int argc, char **argv) {
 		int c, i;
 		while ((c = getopt(argc, argv, "ab:cd:ef:jn:qrs:S:tvx:y:z:")) != -1) {
 			switch (c) {
-				case 'a':
+			case 'a':
 				cfg->analyzer_mode = 1;
 				break;
-				case 'b':
+			case 'b':
 				cfg->bits_to_sample = atoi(optarg);
 				break;
-				case 'c':
+			case 'c':
 				cfg->pulse_counter_active = 1;
 				break;
-				case 'd':
+			case 'd':
 				cfg->decoder_delay = atoi(optarg);
 				break;
-				case 'e':
+			case 'e':
 				cfg->collect_identical_codes = 0;
 				break;
-				case 'f':
+			case 'f':
 				cfg->sysfslike = optarg;
 				break;
-				case 'j':
+			case 'j':
 				cfg->json = 1;
 				break;
-				case 'n':
+			case 'n':
 				cfg->noise = atoi(optarg);
 				break;
-				case 'q':
+			case 'q':
 				cfg->quiet = 1;
 				break;
-				case 'r':
+			case 'r':
 				cfg->realtime_mode = 1;
 				break;
-				case 's':
+			case 's':
 				i = atoi(optarg);
 				switch (i) {
-					case 0:
+				case 0:
 					cfg->sync_on_0 = 1;
 					cfg->sync_on_1 = 0;
 					break;
-					case 1:
+				case 1:
 					cfg->sync_on_0 = 0;
 					cfg->sync_on_1 = 1;
 					break;
-					case 2:
+				case 2:
 					cfg->sync_on_0 = 1;
 					cfg->sync_on_1 = 1;
 					break;
 				}
 				break;
-				case 'S':
+			case 'S':
 				i = atoi(optarg);
 				switch (i) {
-					case 0:
+				case 0:
 					cfg->sample_on_0 = 1;
 					cfg->sample_on_1 = 0;
 					break;
-					case 1:
+				case 1:
 					cfg->sample_on_0 = 0;
 					cfg->sample_on_1 = 1;
 					break;
-					case 2:
+				case 2:
 					cfg->sample_on_0 = 1;
 					cfg->sample_on_1 = 1;
 					break;
 				}
 				break;
-				case 't':
+			case 't':
 				cfg->timestamp = 1; // TODO
 				break;
-				case 'v':
+			case 'v':
 				cfg->verbose = 1;
 				break;
-				case 'x':
+			case 'x':
 				cfg->sync_min = strtoul(optarg, NULL, 0);
 				break;
-				case 'y':
+			case 'y':
 				cfg->sync_max = strtoul(optarg, NULL, 0);
 				break;
-				case 'z':
+			case 'z':
 				cfg->bitdivider = strtoul(optarg, NULL, 0);
 				break;
-				default:
+			default:
 				return usage();
 			}
 		}
@@ -715,7 +715,7 @@ static void* stream_decoder(void *arg) {
 			for (i = 0; i < 8; i++) {
 				lshort = lstream[rewind];
 				hshort = hstream[rewind];
-				if (lshort && hshort && (lshort > 50 || hshort > 50)) {
+				if (lshort && hshort && (lshort > 5 || hshort > 5)) {
 					progress = 1;
 				}
 				rewind++;
