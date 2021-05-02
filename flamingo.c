@@ -186,13 +186,6 @@ static int flamingo_main(int argc, char **argv) {
 
 		// SEND mode
 
-		// elevate realtime priority
-		if (elevate_realtime(3) < 0)
-			return -1;
-
-		if (init_micros())
-			return -2;
-
 		// remote 1, 2, 3, ...
 		int remote = atoi(argv[1]);
 		if (remote < 1 || remote > sizeof(REMOTES)) {
@@ -229,8 +222,10 @@ static int flamingo_main(int argc, char **argv) {
 			}
 		}
 
-		// initialize without receive support
-		flamingo_init(0, 0);
+		// initialize without receive support (clear pattern + default handler)
+		cfg->pattern = 0;
+		cfg->flamingo_handler = 0;
+		flamingo_init();
 		flamingo_send_FA500(remote, channel, command, rolling);
 		return EXIT_SUCCESS;
 
@@ -261,7 +256,7 @@ static int flamingo_main(int argc, char **argv) {
 			return usage();
 		}
 
-		// initialize with receive support: pattern to listen on and a handler routine
+		// initialize with receive support (pattern + default handler)
 		flamingo_init();
 		pause();
 		flamingo_close();
@@ -795,9 +790,6 @@ static void* flamingo(void *arg) {
 	if (elevate_realtime(3) < 0)
 		return (void *) 0;
 
-	if (init_micros())
-		return (void *) 0;
-
 	while (1) {
 		msleep(500);
 
@@ -863,6 +855,13 @@ int flamingo_init() {
 	if (wiringPiSetup() < 0) {
 		return -1;
 	}
+
+	// elevate realtime priority
+	if (elevate_realtime(3) < 0)
+		return -2;
+
+	if (init_micros())
+		return -3;
 
 	// GPIO pin connected to 433MHz sender module
 	pinMode(cfg->tx, OUTPUT);
