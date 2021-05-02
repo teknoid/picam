@@ -32,14 +32,11 @@
  */
 #include <ctype.h>
 #include <pthread.h>
-#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include <sys/mman.h>
-#include <sys/time.h>
 
 #include <wiringPi.h>
 
@@ -52,9 +49,8 @@
 // #define FLAMINGO_MAIN
 
 // global variables used in GPIO interrupt handler
-static unsigned long code, pulse;
+static unsigned long code, pulse, tnow, tlast;
 static unsigned char bits, state, clockbit, databits, decryption;
-static struct timeval tNow, tLong, tLast, tEnd;
 
 static pthread_t thread_flamingo;
 static void* flamingo(void *arg);
@@ -190,18 +186,12 @@ static int flamingo_main(int argc, char **argv) {
 
 		// SEND mode
 
-		// Set our thread to MAX priority
-		struct sched_param sp;
-		memset(&sp, 0, sizeof(sp));
-		sp.sched_priority = sched_get_priority_max(SCHED_FIFO);
-		if (sched_setscheduler(0, SCHED_FIFO, &sp)) {
+		// elevate realtime priority
+		if (elevate_realtime(3) < 0)
 			return -1;
-		}
 
-		// Lock memory to ensure no swapping is done
-		if (mlockall(MCL_FUTURE | MCL_CURRENT)) {
-			return -1;
-		}
+		if (init_micros())
+			return -2;
 
 		// remote 1, 2, 3, ...
 		int remote = atoi(argv[1]);
@@ -280,16 +270,6 @@ static int flamingo_main(int argc, char **argv) {
 }
 #endif
 
-static void _delay(unsigned int millis) {
-	gettimeofday(&tNow, NULL);
-	tLong.tv_sec = millis / 1000000;
-	tLong.tv_usec = millis % 1000000;
-	timeradd(&tNow, &tLong, &tEnd);
-	while (timercmp(&tNow, &tEnd, <)) {
-		gettimeofday(&tNow, NULL);
-	}
-}
-
 //
 // rc1 pattern
 //
@@ -301,11 +281,10 @@ static void _delay(unsigned int millis) {
 //
 static void isr28() {
 	// calculate pulse length; store timer value for next calculation; get pin state
-	gettimeofday(&tNow, NULL);
+	tnow = _micros();
 	state = digitalRead(cfg->rx);
-	pulse = ((tNow.tv_sec * 1000000) + tNow.tv_usec) - ((tLast.tv_sec * 1000000) + tLast.tv_usec);
-	tLast.tv_sec = tNow.tv_sec;
-	tLast.tv_usec = tNow.tv_usec;
+	pulse = tnow - tlast;
+	tlast = tnow;
 
 	// measure HIGH pulse length: short=0 long=1
 	if (bits && (state == 0)) {
@@ -342,11 +321,10 @@ static void isr28() {
 //
 static void isr24() {
 	// calculate pulse length; store timer value for next calculation; get pin state
-	gettimeofday(&tNow, NULL);
+	tnow = _micros();
 	state = digitalRead(cfg->rx);
-	pulse = ((tNow.tv_sec * 1000000) + tNow.tv_usec) - ((tLast.tv_sec * 1000000) + tLast.tv_usec);
-	tLast.tv_sec = tNow.tv_sec;
-	tLast.tv_usec = tNow.tv_usec;
+	pulse = tnow - tlast;
+	tlast = tnow;
 
 	// measure HIGH pulse length: short=0 long=1
 	if (bits && (state == 0)) {
@@ -392,11 +370,10 @@ static void isr24() {
 // https://forum.pilight.org/showthread.php?tid=1110&page=12
 static void isr32() {
 	// calculate pulse length; store timer value for next calculation; get pin state
-	gettimeofday(&tNow, NULL);
+	tnow = _micros();
 	state = digitalRead(cfg->rx);
-	pulse = ((tNow.tv_sec * 1000000) + tNow.tv_usec) - ((tLast.tv_sec * 1000000) + tLast.tv_usec);
-	tLast.tv_sec = tNow.tv_sec;
-	tLast.tv_usec = tNow.tv_usec;
+	pulse = tnow - tlast;
+	tlast = tnow;
 
 	// measure LOW pulses, skip clock and the check space between next pulse
 	if (bits && (state == 1)) {
@@ -451,11 +428,10 @@ static void isr32() {
 // encoding not yet known, simply count and print the data bits after clock bit
 static void isr32_multibit() {
 	// calculate pulse length; store timer value for next calculation; get pin state
-	gettimeofday(&tNow, NULL);
+	tnow = _micros();
 	state = digitalRead(cfg->rx);
-	pulse = ((tNow.tv_sec * 1000000) + tNow.tv_usec) - ((tLast.tv_sec * 1000000) + tLast.tv_usec);
-	tLast.tv_sec = tNow.tv_sec;
-	tLast.tv_usec = tNow.tv_usec;
+	pulse = tnow - tlast;
+	tlast = tnow;
 
 	// measure LOW pulses and decide if it was a data bit or a clock bit
 	if (bits && (state == 1)) {
@@ -501,23 +477,23 @@ static void send28(unsigned long m, int r) {
 
 		// sync
 		digitalWrite(cfg->tx, 1);
-		_delay(T1);
+		delay_micros(T1);
 		digitalWrite(cfg->tx, 0);
-		_delay(T1X15);
+		delay_micros(T1X15);
 
 		while (mask) {
 			if (m & mask) {
 				// 1
 				digitalWrite(cfg->tx, 1);
-				_delay(T1X3);
+				delay_micros(T1X3);
 				digitalWrite(cfg->tx, 0);
-				_delay(T1);
+				delay_micros(T1);
 			} else {
 				// 0
 				digitalWrite(cfg->tx, 1);
-				_delay(T1);
+				delay_micros(T1);
 				digitalWrite(cfg->tx, 0);
-				_delay(T1X3);
+				delay_micros(T1X3);
 			}
 
 			mask = mask >> 1;
@@ -533,23 +509,23 @@ static void send24(unsigned long m, int r) {
 
 		// sync
 		digitalWrite(cfg->tx, 1);
-		_delay(T1);
+		delay_micros(T1);
 		digitalWrite(cfg->tx, 0);
-		_delay(T1X31);
+		delay_micros(T1X31);
 
 		while (mask) {
 			if (m & mask) {
 				// 1
 				digitalWrite(cfg->tx, 1);
-				_delay(T1X3);
+				delay_micros(T1X3);
 				digitalWrite(cfg->tx, 0);
-				_delay(T1);
+				delay_micros(T1);
 			} else {
 				// 0
 				digitalWrite(cfg->tx, 1);
-				_delay(T1);
+				delay_micros(T1);
 				digitalWrite(cfg->tx, 0);
-				_delay(T1X3);
+				delay_micros(T1X3);
 			}
 
 			mask = mask >> 1;
@@ -565,31 +541,31 @@ static void send32(unsigned long m, int r) {
 
 		// sync
 		digitalWrite(cfg->tx, 1);
-		_delay(T2H);
+		delay_micros(T2H);
 		digitalWrite(cfg->tx, 0);
-		_delay(T2S1);
+		delay_micros(T2S1);
 
 		while (mask) {
 			if (m & mask) {
 				// 1
 				digitalWrite(cfg->tx, 1);
-				_delay(T2H);
+				delay_micros(T2H);
 				digitalWrite(cfg->tx, 0);
-				_delay(T2X);
+				delay_micros(T2X);
 				digitalWrite(cfg->tx, 1);
-				_delay(T2H);
+				delay_micros(T2H);
 				digitalWrite(cfg->tx, 0);
-				_delay(T2L);
+				delay_micros(T2L);
 			} else {
 				// 0
 				digitalWrite(cfg->tx, 1);
-				_delay(T2H);
+				delay_micros(T2H);
 				digitalWrite(cfg->tx, 0);
-				_delay(T2L);
+				delay_micros(T2L);
 				digitalWrite(cfg->tx, 1);
-				_delay(T2H);
+				delay_micros(T2H);
 				digitalWrite(cfg->tx, 0);
-				_delay(T2X);
+				delay_micros(T2X);
 			}
 
 			mask = mask >> 1;
@@ -597,12 +573,12 @@ static void send32(unsigned long m, int r) {
 
 		// a clock or parity (?) bit terminates the message
 		digitalWrite(cfg->tx, 1);
-		_delay(T2H);
+		delay_micros(T2H);
 		digitalWrite(cfg->tx, 0);
-		_delay(T2L);
+		delay_micros(T2L);
 
 		// wait before sending next sync
-		_delay(4 * T2S1);
+		delay_micros(4 * T2S1);
 	}
 	usleep(REPEAT_PAUSE2);
 }
@@ -633,32 +609,32 @@ static void send32_multibit(char *m, int r) {
 
 		// sync
 		digitalWrite(cfg->tx, 1);
-		_delay(T3H);
+		delay_micros(T3H);
 		digitalWrite(cfg->tx, 0);
-		_delay(T3S);
+		delay_micros(T3S);
 
 		for (int i = 0; i < 32; i++) {
 
 			// clock bit
 			digitalWrite(cfg->tx, 1);
-			_delay(T3H);
+			delay_micros(T3H);
 			digitalWrite(cfg->tx, 0);
-			_delay(T3L);
+			delay_micros(T3L);
 
 			// data bits
 			for (int j = 0; j < bits[i]; j++) {
 				digitalWrite(cfg->tx, 1);
-				_delay(T3H);
+				delay_micros(T3H);
 				digitalWrite(cfg->tx, 0);
-				_delay(T3L);
+				delay_micros(T3L);
 			}
 
 			// wait to next clock bit
-			_delay(T3X);
+			delay_micros(T3X);
 		}
 
 		// wait before sending next sync
-		_delay(4 * T3S);
+		delay_micros(4 * T3S);
 	}
 	usleep(REPEAT_PAUSE2);
 }
@@ -815,18 +791,12 @@ static void* flamingo(void *arg) {
 		return (void *) 0;
 	}
 
-	// Set our thread to MAX priority
-	struct sched_param sp;
-	memset(&sp, 0, sizeof(sp));
-	sp.sched_priority = sched_get_priority_max(SCHED_FIFO);
-	if (sched_setscheduler(0, SCHED_FIFO, &sp)) {
+	// elevate realtime priority
+	if (elevate_realtime(3) < 0)
 		return (void *) 0;
-	}
 
-	// Lock memory to ensure no swapping is done.
-	if (mlockall(MCL_FUTURE | MCL_CURRENT)) {
+	if (init_micros())
 		return (void *) 0;
-	}
 
 	while (1) {
 		msleep(500);

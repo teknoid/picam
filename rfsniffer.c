@@ -122,7 +122,7 @@ static int rfsniffer_main(int argc, char **argv) {
 		return -1;
 
 	// gain RT
-	if (elevate_realtime(2) < 0)
+	if (elevate_realtime(3) < 0)
 		return -2;
 
 	// initialize a default configuration

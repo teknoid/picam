@@ -64,15 +64,15 @@ static void mcp_init() {
 		exit(EXIT_FAILURE);
 	}
 
-	cfg->rfsniffercfg = rfsniffer_default_config();
-	cfg->rfsniffercfg->rfsniffer_handler = &rfsniffer_syslog_handler;
-	cfg->rfsniffercfg->quiet = 1;
-	cfg->rfsniffercfg->sysfslike = "/ram";
-	cfg->rfsniffercfg->realtime_mode = 1;
-	cfg->rfsniffercfg->noise = 300;
-	if (rfsniffer_init() < 0) {
-		exit(EXIT_FAILURE);
-	}
+//	cfg->rfsniffercfg = rfsniffer_default_config();
+//	cfg->rfsniffercfg->rfsniffer_handler = &rfsniffer_syslog_handler;
+//	cfg->rfsniffercfg->quiet = 1;
+//	cfg->rfsniffercfg->sysfslike = "/ram";
+//	cfg->rfsniffercfg->realtime_mode = 1;
+//	cfg->rfsniffercfg->noise = 300;
+//	if (rfsniffer_init() < 0) {
+//		exit(EXIT_FAILURE);
+//	}
 
 	if (mcp3204_init() < 0) {
 		exit(EXIT_FAILURE);
@@ -92,7 +92,7 @@ static void mcp_init() {
 static void mcp_close() {
 	webcam_close();
 	xmas_close();
-	rfsniffer_close();
+//	rfsniffer_close();
 	flamingo_close();
 
 	syslog(LOG_NOTICE, "all modules successfully closed");

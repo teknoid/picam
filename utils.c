@@ -17,7 +17,11 @@
 static volatile unsigned long *systReg = 0;
 
 //
+// The RT scheduler problem
+//
 // https://www.raspberrypi.org/forums/viewtopic.php?t=228727
+// https://www.codeblueprint.co.uk/2019/10/08/isolcpus-is-deprecated-kinda.html
+// https://www.iot-programmer.com/index.php/books/22-raspberry-pi-and-the-iot-in-c/chapters-raspberry-pi-and-the-iot-in-c/33-raspberry-pi-iot-in-c-almost-realtime-linux
 //
 
 int init_micros() {
