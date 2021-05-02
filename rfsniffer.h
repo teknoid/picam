@@ -14,6 +14,12 @@
 #define P_FLAMINGO32M		5
 #define P_ANALYZE			255
 
+#define NEXUS_PULSE			500
+#define NEXUS_SYNC_MIN		3800
+#define NEXUS_SYNC_MAX		4000
+#define NEXUS_DIVIDER		NEXUS_PULSE * 3
+
+// TODO
 typedef struct rfsniffer_protocol_t {
 
 } rfsniffer_protocol_t;

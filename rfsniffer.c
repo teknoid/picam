@@ -1,6 +1,9 @@
 /***
  *
  * sampling and decoding 433MHz messages
+
+ * unfortunately this works only if the pi is idle
+ * especially there should be no USB traffic during sampling
  *
  * Copyright (C) 04/2021 by teknoid
  *
@@ -12,7 +15,6 @@
  */
 
 #include <pthread.h>
-#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,8 +22,6 @@
 #include <unistd.h>
 #include <poll.h>
 #include <syslog.h>
-#include <sys/mman.h>
-#include <sys/time.h>
 
 //#include <bcm2835.h>
 #include <wiringPi.h>
@@ -120,6 +120,10 @@ static int rfsniffer_main(int argc, char **argv) {
 	// if (!bcm2835_init())
 	if (wiringPiSetup() < 0)
 		return -1;
+
+	// gain RT
+	if (elevate_realtime(2) < 0)
+		return -2;
 
 	// initialize a default configuration
 	cfg = rfsniffer_default_config();
@@ -348,19 +352,15 @@ static void* realtime_decoder(void *arg) {
 	if (!cfg->quiet)
 		printf("DECODER run every %d seconds, %s\n", cfg->decoder_delay, cfg->collect_identical_codes ? "collect identical codes" : "process each code separately");
 
-	struct timeval tNow;
 	unsigned long age_last_message;
-
 	while (1) {
 		sleep(cfg->decoder_delay);
 
 		// repeating transmission: wait until actual message is minimum 500ms old
-		gettimeofday(&tNow, NULL);
-		age_last_message = (((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000) - timestamp_last_code;
+		age_last_message = _micros() - timestamp_last_code;
 		while (age_last_message < 500) {
 			msleep(100);
-			gettimeofday(&tNow, NULL);
-			age_last_message = (((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000) - timestamp_last_code;
+			age_last_message = _micros() - timestamp_last_code;
 			if (cfg->verbose)
 				printf("DECODER receiving in progress %lums\n", age_last_message);
 		}
@@ -381,18 +381,12 @@ static void* realtime_sampler(void *arg) {
 		return (void *) 0;
 	}
 
-	// Set our thread to MAX priority
-	struct sched_param sp;
-	memset(&sp, 0, sizeof(sp));
-	sp.sched_priority = sched_get_priority_max(SCHED_FIFO);
-	if (sched_setscheduler(0, SCHED_FIFO, &sp)) {
+	// elevate realtime priority
+	if (elevate_realtime(3) < 0)
 		return (void *) 0;
-	}
 
-	// Lock memory to ensure no swapping is done.
-	if (mlockall(MCL_FUTURE | MCL_CURRENT)) {
+	if (init_micros())
 		return (void *) 0;
-	}
 
 	// gpio pin setup (not working - use wiringpi gpio program)
 //	bcm2835_gpio_fsel(GPIO_PIN, BCM2835_GPIO_FSEL_INPT);
@@ -412,15 +406,14 @@ static void* realtime_sampler(void *arg) {
 	fdset[0].events = POLLPRI;
 	fdset[0].revents = 0;
 
-	struct timeval tNow, tLast;
 	unsigned long long code;
-	unsigned long pulse, divider, p1, p2;
+	unsigned long pulse, tnow, tlast, divider, p1, p2;
 	unsigned int pulse_counter;
 	unsigned char protocol, state_reset, bits, pin, dummy;
 	short state;
 
 	// initialize tLast for correct 1st pulse calculation
-	gettimeofday(&tLast, NULL);
+	tlast = _micros();
 
 	// initialize the matrix
 	matrix_init();
@@ -459,18 +452,17 @@ static void* realtime_sampler(void *arg) {
 		poll(fdset, 1, 33333);
 
 		// sample time + pin state
-		gettimeofday(&tNow, NULL);
+		tnow = _micros();
 		// pin = bcm2835_gpio_lev(GPIO_PIN);
 		pin = digitalRead(cfg->rx);
-
-		// calculate length of last pulse, store timer value for next calculation
-		pulse = ((tNow.tv_sec * 1000000) + tNow.tv_usec) - ((tLast.tv_sec * 1000000) + tLast.tv_usec);
-		tLast.tv_sec = tNow.tv_sec;
-		tLast.tv_usec = tNow.tv_usec;
 
 		// rewind & clear for next poll
 		lseek(fdset[0].fd, 0, SEEK_SET);
 		read(fdset[0].fd, &dummy, 1);
+
+		// calculate pulse length
+		pulse = tnow - tlast;
+		tlast = tnow;
 
 		// ignore noise & crap
 		if (pulse < cfg->noise)
@@ -547,7 +539,7 @@ static void* realtime_sampler(void *arg) {
 						code++;
 					if (--bits == 0) {
 						matrix_store(protocol, code);
-						timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
+						timestamp_last_code = tnow;
 						state = -1;
 					} else
 						code <<= 1;
@@ -561,7 +553,7 @@ static void* realtime_sampler(void *arg) {
 						code++;
 					if (--bits == 0) {
 						matrix_store(protocol, code);
-						timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
+						timestamp_last_code = tnow;
 						state = -1;
 					} else
 						code <<= 1;
@@ -602,7 +594,7 @@ static void* realtime_sampler(void *arg) {
 							code++;
 						if (--bits == 0) {
 							matrix_store(P_ANALYZE, code);
-							timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
+							timestamp_last_code = tnow;
 							state = -2; // back to analyzer sync mode
 							printf("\n");
 						} else
@@ -616,7 +608,7 @@ static void* realtime_sampler(void *arg) {
 							code++;
 						if (--bits == 0) {
 							matrix_store(P_ANALYZE, code);
-							timestamp_last_code = ((tNow.tv_sec * 1000000) + tNow.tv_usec) / 1000;
+							timestamp_last_code = tnow;
 							state = -2; // back to analyzer sync mode
 							printf("\n");
 						} else
@@ -726,7 +718,7 @@ static void* stream_decoder(void *arg) {
 			for (i = 0; i < 8; i++) {
 				lshort = lstream[rewind];
 				hshort = hstream[rewind];
-				if (lshort && hshort && (lshort > 5 || hshort > 5)) {
+				if (lshort && hshort && (lshort > 50 || hshort > 50)) {
 					progress = 1;
 				}
 				rewind++;
@@ -821,18 +813,12 @@ static void* stream_sampler(void *arg) {
 		return (void *) 0;
 	}
 
-	// Set our thread to MAX priority
-	struct sched_param sp;
-	memset(&sp, 0, sizeof(sp));
-	sp.sched_priority = sched_get_priority_max(SCHED_FIFO);
-	if (sched_setscheduler(0, SCHED_FIFO, &sp)) {
+	// elevate realtime priority
+	if (elevate_realtime(3) < 0)
 		return (void *) 0;
-	}
 
-	// Lock memory to ensure no swapping is done.
-	if (mlockall(MCL_FUTURE | MCL_CURRENT)) {
+	if (init_micros())
 		return (void *) 0;
-	}
 
 	// gpio pin setup (not working - use wiringpi gpio program)
 //	bcm2835_gpio_fsel(GPIO_PIN, BCM2835_GPIO_FSEL_INPT);
@@ -852,12 +838,11 @@ static void* stream_sampler(void *arg) {
 	fdset[0].events = POLLPRI;
 	fdset[0].revents = 0;
 
-	struct timeval tNow, tLast;
-	unsigned long pulse, p1, p2;
+	unsigned long pulse, p1, p2, tnow, tlast;
 	unsigned char pin, dummy;
 
 	// initialize tLast for correct 1st pulse calculation
-	gettimeofday(&tLast, NULL);
+	tlast = _micros();
 
 	// initialize the matrix
 	matrix_init();
@@ -868,14 +853,13 @@ static void* stream_sampler(void *arg) {
 		poll(fdset, 1, 33333);
 
 		// sample time + pin state
-		gettimeofday(&tNow, NULL);
+		tnow = _micros();
 		// pin = bcm2835_gpio_lev(GPIO_PIN);
 		pin = digitalRead(cfg->rx);
 
 		// calculate length of last pulse, store timer value for next calculation
-		pulse = ((tNow.tv_sec * 1000000) + tNow.tv_usec) - ((tLast.tv_sec * 1000000) + tLast.tv_usec);
-		tLast.tv_sec = tNow.tv_sec;
-		tLast.tv_usec = tNow.tv_usec;
+		pulse = tnow - tlast;
+		tlast = tnow;
 
 		// rewind & clear for next poll
 		lseek(fdset[0].fd, 0, SEEK_SET);
