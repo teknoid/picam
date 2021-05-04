@@ -8,9 +8,9 @@ YEAR=$(date +"%Y")
 WWW=/home/www/webcam
 WORK=/ram/webcam
 
-OPTS="-q95 -w -x1280 -y720 -t10"
-
 DEV=/dev/video0
+
+OPTS="-q95 -w -x1280 -y720 -t10 -d$DEV"
 
 # stop webcam capturing
 if [ "$(pidof uvccapture)" ] 

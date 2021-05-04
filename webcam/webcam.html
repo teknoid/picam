@@ -3,7 +3,7 @@
 <html>
 <head>
 	<title>gartencam</title>
-	<meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
 	<link rel="icon" href="../favicon.ico" type="image/x-icon">
 	<link rel="shortcut icon" href="../favicon.ico" type="image/x-icon">
 	<link rel="stylesheet" href="../webcam.css">
@@ -14,6 +14,7 @@
 	<div id="navigation-top">
 		<ul>
 			<li onclick="live();">Live</li>
+			|
 			<li onclick="picture(this,'../image.php?url=050000.jpg');">05</li>
 			<li onclick="picture(this,'../image.php?url=060000.jpg');">06</li>
 			<li onclick="picture(this,'../image.php?url=070000.jpg');">07</li>
@@ -31,6 +32,8 @@
 			<li onclick="picture(this,'../image.php?url=190000.jpg');">19</li>
 			<li onclick="picture(this,'../image.php?url=200000.jpg');">20</li>
 			<li onclick="picture(this,'../image.php?url=210000.jpg');">21</li>
+			|
+			<li><a href="../weather.html">&#10148; Wetter</a></li>
 		</ul>
 	</div>
 
@@ -69,7 +72,7 @@
 			<ul>
 				<li onclick="high()">High</li>
 				<li onclick="low()">Low</li>
-				<li class="has-sub"><<< Highlights
+				<li class="has-sub"><<< Videos
 					<ul id="videos">
 					</ul>
 				</li>
@@ -79,10 +82,18 @@
 
 	<div id="content">
 		<img id="image" src="../image.php?url=current.jpg&ts=" />
-		<div id="data">
-			<div id="temp"></div>
-			<div id="humi"></div>
-			<div id="mtime"></div>
+		<div id="sensors">
+			<div id="temp">
+				<div class="label">Temp</div>
+				<div class="value"></div>
+			</div>
+			<div id="humi">
+				<div class="label">Hum</div>
+				<div class="value"></div>
+			</div>
+			<div id="mtime">
+				<div class="value"></div>
+			</div>
 		</div>
 		<video id="video" controls>
 			<source src="1.mp4">

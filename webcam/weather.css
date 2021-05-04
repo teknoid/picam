@@ -1,0 +1,92 @@
+body {
+	margin: 0;
+	paddung: 0;
+	color: black;
+	background-color: white;
+	font-size: 14px;
+	font-family: "Lucida Console", "Courier New", monospace;
+	font-weight: normal;
+	white-space: nowrap;
+	overflow: hidden;
+	color: #666;
+}
+
+ul {
+	margin: 0;
+	padding: 0;
+	border: 1px solid #c8c8c8;
+	border-radius: 5px;
+}
+
+ul li {
+	padding: 0.5em;
+	list-style: none;
+	font-weight: bold;
+	text-decoration: none;
+}
+
+ul li:hover {
+	color: #F60;
+	cursor: pointer;
+}
+
+a {
+	color: #666;
+	text-decoration: none;
+}
+
+ul li a:hover {
+	color: #F60;
+}
+
+#content {
+	position: relative;
+	width: max-content;
+	margin-left: auto;
+	margin-right: auto;
+}
+
+.current {
+	font-size: 1.25em;
+	font-weight: bold;
+	font-style: italic;
+	border-bottom: 1px solid #666;
+	margin-bottom: 5px;
+	display: inline-block;
+	width: 250px;
+}
+
+.label {
+	display: inline-flex;
+	width: 150px;
+	font-weight: bold;
+}
+
+.value {
+	display: inline-flex;
+}
+
+#sensors {
+	
+}
+
+#navigation-top {
+	padding-top: 0.5em;
+	padding-bottom: 0.5em;
+	text-align: center;
+}
+
+#navigation-top ul {
+	border: none;
+	width: 100%;
+	text-align: center;
+}
+
+#navigation-top ul li {
+	padding: 5px 10px 3px 10px;
+	display: inline-block;
+	border: 1px solid #c8c8c8;
+	border-radius: 5px;
+	background-color: white;
+	display: inline-block;
+}

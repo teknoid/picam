@@ -1,14 +1,13 @@
 body {
 	margin: 0;
 	paddung: 0;
-	color: black;
 	background-color: white;
 	font-size: 14px;
-	font-family: arial, sans-serif;
+	font-family: "Lucida Console", "Courier New", monospace;
 	font-weight: normal;
 	white-space: nowrap;
 	overflow: hidden;
-	color: black;
+	color: #666;
 }
 
 ul {
@@ -16,7 +15,6 @@ ul {
 	padding: 0;
 	border: 1px solid #c8c8c8;
 	border-radius: 5px;
-	background-color: white;
 }
 
 ul li {
@@ -24,13 +22,20 @@ ul li {
 	list-style: none;
 	font-weight: bold;
 	text-decoration: none;
-	color: #666;
 }
 
 ul li:hover {
 	color: #F60;
-	background-color: #efefef;
 	cursor: pointer;
+}
+
+a {
+	color: #666;
+	text-decoration: none;
+}
+
+ul li a:hover {
+	color: #F60;
 }
 
 #content {
@@ -38,7 +43,6 @@ ul li:hover {
 	width: max-content;
 	margin-left: auto;
 	margin-right: auto;
-	font-family: "Lucida Console", "Courier New", monospace;
 	color: #f60;
 }
 
@@ -51,7 +55,15 @@ ul li:hover {
 	display: none;
 }
 
-#data {
+.label {
+	display: inline-flex;
+}
+
+.value {
+	display: inline-flex;
+}
+
+#sensors {
 	
 }
 
@@ -86,7 +98,7 @@ ul li:hover {
 }
 
 #navigation-top ul li {
-	padding: 0.3em 0.9em;
+	padding: 5px 10px 3px 10px;
 	display: inline-block;
 	border: 1px solid #c8c8c8;
 	border-radius: 5px;

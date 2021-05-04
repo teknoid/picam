@@ -21,21 +21,22 @@ function live(res) {
 	}
 }
 
-function picture(hour, src) {
+function picture(e, src) {
+	document.getElementById('sensors').style.display = "none";
+	document.getElementById('video').style.display = "none";
 	var hours = document.querySelectorAll('#navigation-top > ul > li');
 	for (var i = 0; i < hours.length; i++) {
 		hours[i].style.background = '#fff';
 	}
-	hour.style.background = '#efefef';
-	document.getElementById('data').style.display = "none";
-	document.getElementById('video').style.display = "none";
+	e.style.background = '#efefef';
 	var myImage = document.getElementById("image");
 	myImage.style.display = "inline";
 	myImage.src = src;
+
 }
 
 function video(vidURL) {
-	document.getElementById('data').style.display = "none";
+	document.getElementById('sensors').style.display = "none";
 	document.getElementById('image').style.display = "none";
 	document.getElementById('navigation-top').style.display = "none";
 	var myVideo = document.getElementById('video');
@@ -64,13 +65,16 @@ function loadVideos() {
 }
 function updateData() {
 	var request = new XMLHttpRequest();
-	request.open("GET", "../data.php");
+	request.open("GET", "../sensors.php");
 	request.addEventListener('load', function(event) {
 		if (this.status == 200) {
 			var data = JSON.parse(this.responseText);
 			Object.entries(data).forEach(([k, v]) => {
-				var e = document.getElementById(k);
-				if (e) e.innerHTML = v;
+				var sensor = document.querySelector('#' + k);
+				if (sensor) { 
+					var value = sensor.querySelector('.value');
+					if (value) value.innerHTML = v;
+				}
 			});
 		}
 	});
