@@ -25,7 +25,7 @@ function show(e, interval) {
 	var imgs = document.querySelectorAll('img');
 	Object.entries(imgs).forEach(([i, img]) => {
 		const token = img.src.replace(/^.*[\\\/]/, '').split('.');
-		const newsrc = '/monitorix/imgs/' + token[0] + '.' + interval + '.' + token[2];
+		const newsrc = '/monitorix/imgs/' + token[0] + '.' + interval + '.png?ts=' + new Date().getTime();
 		img.src = newsrc;
 	});
 }
