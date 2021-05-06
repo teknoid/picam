@@ -55,9 +55,9 @@ static pthread_t thread_sampler;
 static void* realtime_sampler(void *arg);
 static void* stream_sampler(void *arg);
 
-// ring buffers
+// stream_decoder: ring buffers
 static unsigned short lstream[0xffff], hstream[0xffff];
-static unsigned short stream_write;
+static unsigned short stream_write, stream_read;
 
 // code matrix: x=protocol code, y=code number, [x][0] contains next free entry
 static unsigned long long matrix[BUFFER][BUFFER];
@@ -66,6 +66,7 @@ static unsigned long long matrix[BUFFER][BUFFER];
 static unsigned short lpulse_counter[PULSE_COUNTER_MAX];
 static unsigned short hpulse_counter[PULSE_COUNTER_MAX];
 
+// realtime_decoder: calculate age of last message
 static unsigned long timestamp_last_code;
 
 static rfsniffer_config_t *cfg;
@@ -117,6 +118,8 @@ static int usage() {
 }
 
 static int rfsniffer_main(int argc, char **argv) {
+	// return rfcodec_test();
+
 	// if (!bcm2835_init())
 	if (wiringPiSetup() < 0)
 		return -1;
@@ -352,12 +355,11 @@ static void* realtime_decoder(void *arg) {
 	if (!cfg->quiet)
 		printf("DECODER run every %d seconds, %s\n", cfg->decoder_delay, cfg->collect_identical_codes ? "collect identical codes" : "process each code separately");
 
-	unsigned long age_last_message;
 	while (1) {
 		sleep(cfg->decoder_delay);
 
 		// repeating transmission: wait until actual message is minimum 500ms old
-		age_last_message = _micros() - timestamp_last_code;
+		unsigned long age_last_message = _micros() - timestamp_last_code;
 		while (age_last_message < 500) {
 			msleep(100);
 			age_last_message = _micros() - timestamp_last_code;
@@ -506,22 +508,22 @@ static void* realtime_sampler(void *arg) {
 					// not a real sync - it's the pause between 1st and 2nd message
 					protocol = P_NEXUS;
 					bits = 36;
-					state = 1; // LOW pulses
+					state = 0; // LOW pulses
 					divider = 1500;
 				} else if (T1SMIN < pulse && pulse < T1SMAX) {
 					protocol = P_FLAMINGO28;
 					bits = 28;
-					state = 0; // HIGH pulses
+					state = 1; // HIGH pulses
 					divider = T1X2;
 				} else if (T4SMIN < pulse && pulse < T4SMAX) {
 					bits = 24;
 					protocol = P_FLAMINGO24;
-					state = 0; // HIGH pulses
+					state = 1; // HIGH pulses
 					divider = T1X2;
-				} else if (T2S1MIN < pulse && pulse < T2S1MAX) {
+				} else if (2600 < pulse && pulse < 2800) {
 					bits = 64;
 					protocol = P_FLAMINGO32;
-					state = 1; // LOW pulses
+					state = 0; // LOW pulses
 					divider = T2Y;
 				}
 			} else {
@@ -529,7 +531,7 @@ static void* realtime_sampler(void *arg) {
 			}
 			break;
 
-		case 1: // sample LOW pulses
+		case 0: // sample LOW pulses
 			if (bits)
 				if (pin) {
 					if (pulse > divider)
@@ -543,7 +545,7 @@ static void* realtime_sampler(void *arg) {
 				}
 			break;
 
-		case 0: // sample HIGH pulses
+		case 1: // sample HIGH pulses
 			if (bits)
 				if (!pin) {
 					if (pulse > divider)
@@ -623,17 +625,40 @@ static void* realtime_sampler(void *arg) {
 	return (void *) 0;
 }
 
+static void stream_dump(unsigned short start, unsigned short positions) {
+	unsigned short i, l, h;
+	printf("DUMP %05u+%u :: ", start, positions);
+	for (i = 0; i < positions; i++) {
+		l = lstream[start];
+		h = hstream[start];
+		start++;
+		printf("H%03u L%03u ", h, l);
+	}
+	printf("\n");
+}
+
 //
-// short high pulse followed by long low pulse or long high + short low pulse, no clock
-//       _              ___
-// 0 = _| |___    1 = _|   |_
+// short low or long low pulse
+//   _   _     _     _
+//    |_|       |___|
+//      0           1
+//
+// this signal can be encoded as 01 10 sequences: clock pulse + data pulse:
+// either short or long distance from clock to data pulse:
+//     _   _               _      _
+//    | |_| |____|        | |____| |_|
+//        0      1               1   0
+// =            01                  10
+// =             0                   1
+//
+// this may require a dummy bit at end of transmission
 //
 static unsigned long long stream_probe_low(unsigned short pos, unsigned char bits, unsigned short divider) {
 	unsigned long long code = 0;
-	unsigned short l, h;
+	unsigned long l, h;
 	for (int i = 0; i < bits; i++) {
-		l = lstream[pos];
-		h = hstream[pos];
+		l = lstream[pos] * 10;
+		h = hstream[pos] * 10;
 
 		if (!l && !h)
 			return 0;
@@ -648,16 +673,16 @@ static unsigned long long stream_probe_low(unsigned short pos, unsigned char bit
 }
 
 //
-// clock pulse + data pulse, either short or long distance from clock to data pulse
-//       _   _               _      _
-// 0 = _| |_| |____    1 = _| |____| |_
-//
+// short high pulse followed by long low pulse or long high + short low pulse, no clock
+//     _           ___
+//   _| |___     _|   |_
+//      0             1
 static unsigned long long stream_probe_high(unsigned short pos, unsigned char bits, unsigned short divider) {
 	unsigned long long code = 0;
-	unsigned short l, h;
+	unsigned long l, h;
 	for (int i = 0; i < bits; i++) {
-		l = lstream[pos];
-		h = hstream[pos];
+		l = lstream[pos] * 10;
+		h = hstream[pos] * 10;
 
 		if (!l && !h)
 			return 0;
@@ -671,22 +696,20 @@ static unsigned long long stream_probe_high(unsigned short pos, unsigned char bi
 	return code;
 }
 
-static unsigned short stream_rewind(unsigned short current, unsigned short positions) {
+// rewind stream_write position
+static unsigned short stream_rewind(int positions) {
+	unsigned short current = stream_write;
 	for (int i = 0; i < positions; i++)
 		current--;
 	return current;
 }
 
-static void stream_dump(unsigned short start, unsigned short positions) {
-	unsigned short i, l, h;
-	printf("DUMP %05u+%u :: ", start, positions);
-	for (i = 0; i < positions; i++) {
-		l = lstream[start];
-		h = hstream[start];
-		start++;
-		printf("H%03u L%03u ", l, h);
+// stream_read follows stream_write without overtake
+static void stream_consume(int positions) {
+	while (positions && (stream_read != stream_write)) {
+		stream_read++;
+		positions--;
 	}
-	printf("\n");
 }
 
 static void* stream_decoder(void *arg) {
@@ -699,25 +722,27 @@ static void* stream_decoder(void *arg) {
 		printf("DECODER run every %d seconds, %s\n", cfg->decoder_delay, cfg->collect_identical_codes ? "collect identical codes" : "process each code separately");
 
 	unsigned short delta, stream_last;
-	unsigned short i, lshort, hshort, rewind, progress, stream_read = 0;
+	unsigned short i, lshort, hshort, rewind, progress;
 	unsigned long l;
 	// unsigned long h;
 	unsigned long long code;
 
+	stream_read = 0;
 	while (1) {
 		sleep(cfg->decoder_delay);
 
-		// wait till we see 8 bits of noise (<50µs)
+		// if we see 8 bit valid pulses then wait (assuming receiving in progress)
 		do {
-			progress = 0;
-			rewind = stream_rewind(stream_write, 8);
-			// stream_dump(rewind, 8);
+			rewind = stream_rewind(8);
 			for (i = 0; i < 8; i++) {
+				progress = 0;
 				lshort = lstream[rewind];
+				if (!lshort || lshort > 222)
+					break;
 				hshort = hstream[rewind];
-				if (lshort && hshort && (lshort > 5 || hshort > 5)) {
-					progress = 1;
-				}
+				if (!hshort || hshort > 222)
+					break;
+				progress = 1;
 				rewind++;
 			}
 			if (progress) {
@@ -731,7 +756,7 @@ static void* stream_decoder(void *arg) {
 		if (cfg->verbose)
 			printf("DECODER stream [%05u:%04u]\n", stream_write, delta);
 
-		do {
+		while (1) {
 
 			// update pulse counters: 10th pulse length is the array index
 			if (cfg->pulse_counter_active) {
@@ -754,30 +779,38 @@ static void* stream_decoder(void *arg) {
 				// not a real sync - it's the pause between 1st and 2nd message - but 1st message is always blurred
 				if (cfg->verbose)
 					printf("DECODER %lu SYNC on NEXUS\n", l);
-				code = stream_probe_low(stream_read, 36, 150);
-				if (code)
+				code = stream_probe_low(stream_read, 36, 1500);
+				if (code) {
 					matrix_store(P_NEXUS, code);
+					stream_consume(36);
+				}
 
 			} else if (T1SMIN < l && l < T1SMAX) {
 				if (cfg->verbose)
 					printf("DECODER %lu SYNC on FLAMINGO28\n", l);
 				code = stream_probe_high(stream_read, 28, T1X2);
-				if (code)
+				if (code) {
 					matrix_store(P_FLAMINGO28, code);
+					stream_consume(28);
+				}
 
 			} else if (T4SMIN < l && l < T4SMAX) {
 				if (cfg->verbose)
 					printf("DECODER %lu SYNC on FLAMINGO24\n", l);
 				code = stream_probe_high(stream_read, 24, T1X2);
-				if (code)
+				if (code) {
 					matrix_store(P_FLAMINGO24, code);
+					stream_consume(24);
+				}
 
-			} else if (T2S1MIN < l && l < T2S1MAX) {
+			} else if (2600 < l && l < 2800) {
 				if (cfg->verbose)
 					printf("DECODER %lu SYNC on FLAMINGO32\n", l);
 				code = stream_probe_low(stream_read, 64, T2Y);
-				if (code)
+				if (code) {
 					matrix_store(P_FLAMINGO32, code);
+					stream_consume(64);
+				}
 
 			} else if (cfg->sync_min < l && l < cfg->sync_max) {
 				if (cfg->verbose) {
@@ -785,21 +818,30 @@ static void* stream_decoder(void *arg) {
 					stream_dump(stream_read, 8);
 				}
 				code = stream_probe_low(stream_read, cfg->bits_to_sample, cfg->bitdivider);
-				if (code)
+				if (code) {
 					matrix_store(P_ANALYZE, code);
+					// stream_consume(cfg->bits_to_sample);
+				}
 				code = stream_probe_high(stream_read, cfg->bits_to_sample, cfg->bitdivider);
-				if (code)
+				if (code) {
 					matrix_store(P_ANALYZE, code);
+					// stream_consume(cfg->bits_to_sample);
+				}
 			}
 
-		} while (++stream_read != stream_write); // follow the stream_write position
-		stream_last = stream_write;
+			if (stream_read++ == stream_write)
+				break; // reached stream_write position
+		}
 
 		// print pulse counters,  top ten pulse lengths, clear counters
 		if (cfg->pulse_counter_active)
 			dump_pulse_counters();
 
+		// process received codes
 		matrix_decode();
+
+		// store for next round
+		stream_last = stream_read;
 	}
 	return (void *) 0;
 }

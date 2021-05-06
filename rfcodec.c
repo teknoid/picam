@@ -20,31 +20,32 @@
 static rfsniffer_config_t *cfg;
 
 static unsigned long decode_0110(unsigned long long in) {
-	unsigned long long shift;
-	unsigned char mask = 0b11;
-	unsigned char bit0 = 0b01;
-	unsigned char bit1 = 0b10;
-	unsigned char count = 64;
+	unsigned long long mask;
 	unsigned long out = 0;
+	int count = 62;
 
-	// printf("\n0110 %s", printbits64(in, 0x0001000100010001));
+	mask = 0b11;
+	mask <<= count; 					// 11000000...00000000
+
 	while (count > 0) {
-		shift = (in >> 62) & mask;
-
-		out <<= 1;
-		if (shift == bit0) {
+		int x = (in & mask) >> count;	// 00000000...000000XX
+		switch (x) {
+		case 0b01:
 			out += 0;
-		} else if (shift == bit1) {
+			break;
+		case 0b10:
 			out += 1;
-		} else {
+			break;
+		default:
 			if (cfg->verbose)
 				printf("0110 decode error %s\n", printbits64(in, 0x0001000100010001));
 			return 0;
 		}
+
+		mask >>= 2;
 		count -= 2;
-		in <<= 2;
+		out <<= 1;
 	}
-	// printf("--> %s\n", printbits(out, 0x00010001));
 	return out;
 }
 
@@ -127,17 +128,26 @@ static void decode_nexus(unsigned char protocol, unsigned long long raw, unsigne
 static void decode_flamingo28(unsigned char protocol, unsigned long long raw, unsigned char repeat) {
 	unsigned long code;
 	unsigned int xmitter;
-	unsigned char channel, command, payload, rolling;
+	unsigned char channel, command, payload, rolling, valid;
 
 	code = decrypt(raw);
 	decode_FA500(code, &xmitter, &channel, &command, &payload, &rolling);
 
-	// TODO validate against xmitters
+	valid = 0;
+	for (int i = 0; i < ARRAY_SIZE(REMOTES); i++) {
+		if (xmitter == REMOTES[i])
+			valid = 1;
+	}
+	if (!valid) {
+		if (cfg->verbose)
+			printf("FLAMINGO28 discard message, unknown transmitter ID 0x%02x\n", xmitter);
+		return;
+	}
 
 	// create strings
 	char cmessage[BUFFER];
-	const char *fmt_message = "FLAMINGO28 0x%08llx Id = 0x%x, Channel = %d, Command = %d, Payload = 0x%02x, Rolling = %d\n";
-	snprintf(cmessage, BUFFER, fmt_message, raw, xmitter, channel, command, payload, rolling);
+	const char *fmt_message = "FLAMINGO28 {%d} 0x%08llx         Id = 0x%x, Channel = %d, Command = %d, Payload = 0x%02x, Rolling = %d\n";
+	snprintf(cmessage, BUFFER, fmt_message, repeat, raw, xmitter, channel, command, payload, rolling);
 
 	if (cfg->json) {
 		char format[BUFFER], craw[12], cid[12];
@@ -192,7 +202,7 @@ static void decode_flamingo32(unsigned char protocol, unsigned long long raw, un
 		return;
 
 	unsigned int xmitter;
-	unsigned char channel, command, payload;
+	unsigned char channel, command, payload, valid;
 	unsigned long code_save = code;
 	channel = code & 0x0f;
 	code >>= 4; // channel
@@ -202,12 +212,21 @@ static void decode_flamingo32(unsigned char protocol, unsigned long long raw, un
 	code >>= 16; // xmitter
 	payload = code & 0xff;
 
-	// TODO validate against xmitters
+	valid = 0;
+	for (int i = 0; i < ARRAY_SIZE(REMOTES); i++) {
+		if (xmitter == REMOTES[i])
+			valid = 1;
+	}
+	if (!valid) {
+		if (cfg->verbose)
+			printf("FLAMINGO32 discard message, unknown transmitter ID 0x%02x\n", xmitter);
+		return;
+	}
 
 	// create strings
 	char cmessage[BUFFER];
-	const char *fmt_message = "FLAMINGO32 0x%08llx Id = 0x%x, Channel = %d, Command = %d, Payload = 0x%02x\n";
-	snprintf(cmessage, BUFFER, fmt_message, raw, xmitter, channel, command, payload);
+	const char *fmt_message = "FLAMINGO32 {%d} 0x%08llx Id = 0x%x, Channel = %d, Command = %d, Payload = 0x%02x\n";
+	snprintf(cmessage, BUFFER, fmt_message, repeat, raw, xmitter, channel, command, payload);
 
 	if (cfg->json) {
 		char format[BUFFER], craw[12], cid[12];
@@ -237,6 +256,16 @@ static void decode_flamingo32(unsigned char protocol, unsigned long long raw, un
 static void decode_anaylzer(unsigned char protocol, unsigned long long raw, unsigned char r) {
 	if (!cfg->quiet)
 		printf("ANALYZER 0x%08llx %s\n", raw, printbits64(raw, 0x0101010101010101));
+}
+
+int rfcodec_test() {
+	unsigned long long c1 = 0x5555955a66995556;
+	printf("%s\n", printbits64(c1, 0x0101010101010101));
+
+	unsigned long long c2 = decode_0110(c1);
+	printf("%s\n", printbits(c2, 0x01010101));
+
+	return 0;
 }
 
 void rfcodec_decode(unsigned char protocol, unsigned long long code, unsigned char repeat) {

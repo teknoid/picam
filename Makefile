@@ -20,7 +20,7 @@ mcp3204: mcp3204.o utils.o
 	$(CC) $(CFLAGS) -DMCP3204_MAIN -c mcp3204.c
 	$(CC) $(LFLAGS) -o mcp3204 mcp3204.o utils.o $(LIBS)
 
-rfsniffer: rfsniffer.o flamingo.o utils.o frozen.o
+rfsniffer: rfsniffer.o rfcodec.o flamingo.o utils.o frozen.o
 	$(CC) $(CFLAGS) -DRFSNIFFER_MAIN -c flamingo.c rfsniffer.c rfcodec.c
 	$(CC) $(LFLAGS) -o rfsniffer flamingo.o rfsniffer.o rfcodec.o utils.o frozen.o $(LIBS)
 

@@ -79,3 +79,4 @@ int rfsniffer_close();
 
 void rfcodec_decode(unsigned char protocol, unsigned long long code, unsigned char repeat);
 void rfcodec_set_config(rfsniffer_config_t *cfg);
+int rfcodec_test();

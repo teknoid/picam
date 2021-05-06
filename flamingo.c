@@ -402,14 +402,14 @@ static void isr32() {
 			bits = 32;
 			clockbit = 0; // this is the first clock pulse
 			if (!cfg->quiet)
-				printf("32bit LOW sync %lu :: ", pulse);
+				printf("32bit S1 LOW sync %lu :: ", pulse);
 
 		} else if (T2S2MIN < pulse && pulse < T2S2MAX) {
 			code = 0;
 			bits = 32;
 			clockbit = 0; // this is the first clock pulse
 			if (!cfg->quiet)
-				printf("32bit LOW sync %lu :: ", pulse);
+				printf("32bit S2 LOW sync %lu :: ", pulse);
 
 		}
 	}
