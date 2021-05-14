@@ -20,7 +20,7 @@ function updateMonitorix(when) {
 
 function updateCurrent() {
 	var request = new XMLHttpRequest();
-	request.open('GET', 'sensors.php');
+	request.open('GET', 'weather.php');
 	request.addEventListener('load', function(event) {
 		if (this.status == 200) {
 			var data = JSON.parse(this.responseText);
