@@ -10,8 +10,9 @@ $exclude = array(
     'Proove-Security',
     'Nexa-Security',
     'Rubicson-Temperature',
+    'Nexus-TH',
+    'Prologue-TH',
     'Generic-Temperature',
-    'Nexus-TH'
 );
 
 function temp_f2c($in)

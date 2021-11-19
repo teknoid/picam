@@ -32,6 +32,10 @@
 
 // #define RFSNIFFER_MAIN
 
+// #define RX				247
+// #define TX				219
+// #define GPIO_PIN			247	//OdroidC2
+
 #define RX					2
 #define TX					0
 #define GPIO_PIN			27	//RPi2 Pin13 GPIO_GEN2

@@ -3,7 +3,7 @@
 header('Content-Type: application/json');
 
 $webcam = '/ram/webcam/';
-$nexus = '/ram/433/Nexus-TH/231/';
+$nexus = '/ram/433/Nexus-TH/53/';
 
 if (file_exists($webcam) && file_exists($nexus)) {
     $json = array(
