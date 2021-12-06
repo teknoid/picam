@@ -9,8 +9,8 @@ OBJS = $(SRCS:.c=.o)
 
 all: clean mcp flamingo mcp3204 rfsniffer
 
-mcp: mcp.o utils.o xmas.o mcp3204.o webcam.o flamingo.o rfsniffer.o rfcodec.o frozen.o
-	$(CC) $(CFLAGS) -o mcp mcp.o utils.o xmas.o mcp3204.o webcam.o flamingo.o rfsniffer.o rfcodec.o frozen.o $(LIBS)
+mcp: mcp.o utils.o lumi.o xmas.o mcp3204.o webcam.o flamingo.o rfsniffer.o rfcodec.o frozen.o
+	$(CC) $(CFLAGS) -o mcp mcp.o utils.o lumi.o xmas.o mcp3204.o webcam.o flamingo.o rfsniffer.o rfcodec.o frozen.o $(LIBS)
 
 flamingo: flamingo.o utils.o 
 	$(CC) $(CFLAGS) -DFLAMINGO_MAIN -c flamingo.c

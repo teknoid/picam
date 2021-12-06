@@ -86,10 +86,15 @@ static void mcp_init() {
 		exit(EXIT_FAILURE);
 	}
 
+	if (lumi_init() < 0) {
+		exit(EXIT_FAILURE);
+	}
+
 	syslog(LOG_NOTICE, "all modules successfully initialized");
 }
 
 static void mcp_close() {
+	lumi_close();
 	webcam_close();
 	xmas_close();
 //	rfsniffer_close();
