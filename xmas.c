@@ -1,5 +1,3 @@
-#include "xmas.h"
-
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +9,7 @@
 #include "mcp3204.h"
 #include "flamingo.h"
 #include "utils.h"
+#include "xmas.h"
 
 // TODO define channel status for each remote control unit
 static char channel_status[128];
@@ -25,6 +24,7 @@ static void send_on(const timing_t *timing) {
 		syslog(LOG_NOTICE, "flamingo_send_FA500 %d %c 1\n", timing->remote, timing->channel);
 		flamingo_send_FA500(timing->remote, timing->channel, 1, -1);
 		channel_status[index] = 1;
+		system(XMAS_ON);
 	}
 }
 
@@ -34,6 +34,7 @@ static void send_off(const timing_t *timing) {
 		syslog(LOG_NOTICE, "flamingo_send_FA500 %d %c 0\n", timing->remote, timing->channel);
 		flamingo_send_FA500(timing->remote, timing->channel, 0, -1);
 		channel_status[index] = 0;
+		system(XMAS_OFF);
 	}
 }
 
