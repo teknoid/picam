@@ -33,7 +33,7 @@ void lumi_close() {
 
 static void* lumi(void *arg) {
 	char cvalue[5];
-	int value;
+	unsigned int value;
 
 	if (pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL)) {
 		syslog(LOG_ERR, "Error setting pthread_setcancelstate");
@@ -48,7 +48,7 @@ static void* lumi(void *arg) {
 
 	while (1) {
 		value = mcp3204_read();
-		snprintf(cvalue, 4, "%d", value);
+		snprintf(cvalue, 5, "%u", value);
 
 		create_sysfslike(DIRECTORY, "lumi", cvalue, "%s", "MCP3204");
 
