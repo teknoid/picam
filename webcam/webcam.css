@@ -82,6 +82,12 @@ ul li a:hover {
 	left: 130px;
 }
 
+#lumi {
+	position: absolute;
+	top: 10px;
+	left: 230px;
+}
+
 #mtime {
 	position: absolute;
 	top: 10px;

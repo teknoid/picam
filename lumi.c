@@ -49,8 +49,11 @@ static void* lumi(void *arg) {
 	while (1) {
 		value = mcp3204_read();
 		snprintf(cvalue, 5, "%u", value);
+		create_sysfslike(DIRECTORY, "lum_raw", cvalue, "%s", "MCP3204");
 
-		create_sysfslike(DIRECTORY, "lumi", cvalue, "%s", "MCP3204");
+		value = ((ADC_MAX - value) * 100) / ADC_MAX;
+		snprintf(cvalue, 5, "%u", value);
+		create_sysfslike(DIRECTORY, "lum_percent", cvalue, "%s", "MCP3204");
 
 		sleep(60);
 	}
