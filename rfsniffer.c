@@ -30,7 +30,7 @@
 #include "flamingo.h"
 #include "utils.h"
 
-// #define RFSNIFFER_MAIN
+// #define RFSNIFFER_MAIN - in Makefile !!!
 
 // #define RX				247
 // #define TX				219
@@ -779,57 +779,64 @@ static void* stream_decoder(void *arg) {
 
 			l = lstream[stream_read] * 10;
 			// h = hstream[stream_read] * 10;
-			if (3800 < l && l < 4000) {
-				// not a real sync - it's the pause between 1st and 2nd message - but 1st message is always blurred
-				if (cfg->verbose)
-					printf("DECODER %lu SYNC on NEXUS\n", l);
-				code = stream_probe_low(stream_read, 36, 1500);
-				if (code) {
-					matrix_store(P_NEXUS, code);
-					stream_consume(36);
+
+			if (cfg->analyzer_mode) {
+				// only sync on configured pulses
+				if (cfg->sync_min < l && l < cfg->sync_max) {
+					if (cfg->verbose) {
+						printf("DECODER %lu SYNC on ?, ", l);
+						stream_dump(stream_read, 10);
+					}
+					code = stream_probe_low(stream_read, cfg->bits_to_sample, cfg->bitdivider);
+					if (code) {
+						matrix_store(P_ANALYZE, code);
+						// stream_consume(cfg->bits_to_sample);
+					}
+					code = stream_probe_high(stream_read, cfg->bits_to_sample, cfg->bitdivider);
+					if (code) {
+						matrix_store(P_ANALYZE, code);
+						// stream_consume(cfg->bits_to_sample);
+					}
 				}
 
-			} else if (T1SMIN < l && l < T1SMAX) {
-				if (cfg->verbose)
-					printf("DECODER %lu SYNC on FLAMINGO28\n", l);
-				code = stream_probe_high(stream_read, 28, T1X2);
-				if (code) {
-					matrix_store(P_FLAMINGO28, code);
-					stream_consume(28);
-				}
+			} else {
+				// sync on all known pulses
+				if (3800 < l && l < 4000) {
+					// not a real sync - it's the pause between 1st and 2nd message - but 1st message is always blurred
+					if (cfg->verbose)
+						printf("DECODER %lu SYNC on NEXUS\n", l);
+					code = stream_probe_low(stream_read, 36, 1500);
+					if (code) {
+						matrix_store(P_NEXUS, code);
+						stream_consume(36);
+					}
 
-			} else if (T4SMIN < l && l < T4SMAX) {
-				if (cfg->verbose)
-					printf("DECODER %lu SYNC on FLAMINGO24\n", l);
-				code = stream_probe_high(stream_read, 24, T1X2);
-				if (code) {
-					matrix_store(P_FLAMINGO24, code);
-					stream_consume(24);
-				}
+				} else if (T1SMIN < l && l < T1SMAX) {
+					if (cfg->verbose)
+						printf("DECODER %lu SYNC on FLAMINGO28\n", l);
+					code = stream_probe_high(stream_read, 28, T1X2);
+					if (code) {
+						matrix_store(P_FLAMINGO28, code);
+						stream_consume(28);
+					}
 
-			} else if (2600 < l && l < 2800) {
-				if (cfg->verbose)
-					printf("DECODER %lu SYNC on FLAMINGO32\n", l);
-				code = stream_probe_low(stream_read, 64, T2Y);
-				if (code) {
-					matrix_store(P_FLAMINGO32, code);
-					stream_consume(64);
-				}
+				} else if (T4SMIN < l && l < T4SMAX) {
+					if (cfg->verbose)
+						printf("DECODER %lu SYNC on FLAMINGO24\n", l);
+					code = stream_probe_high(stream_read, 24, T1X2);
+					if (code) {
+						matrix_store(P_FLAMINGO24, code);
+						stream_consume(24);
+					}
 
-			} else if (cfg->sync_min < l && l < cfg->sync_max) {
-				if (cfg->verbose) {
-					printf("DECODER %lu SYNC on ?, ", l);
-					stream_dump(stream_read, 8);
-				}
-				code = stream_probe_low(stream_read, cfg->bits_to_sample, cfg->bitdivider);
-				if (code) {
-					matrix_store(P_ANALYZE, code);
-					// stream_consume(cfg->bits_to_sample);
-				}
-				code = stream_probe_high(stream_read, cfg->bits_to_sample, cfg->bitdivider);
-				if (code) {
-					matrix_store(P_ANALYZE, code);
-					// stream_consume(cfg->bits_to_sample);
+				} else if (2600 < l && l < 2800) {
+					if (cfg->verbose)
+						printf("DECODER %lu SYNC on FLAMINGO32\n", l);
+					code = stream_probe_low(stream_read, 64, T2Y);
+					if (code) {
+						matrix_store(P_FLAMINGO32, code);
+						stream_consume(64);
+					}
 				}
 			}
 
@@ -996,7 +1003,7 @@ void rfsniffer_syslog_handler(rfsniffer_event_t *e) {
 	free(e);
 }
 
-rfsniffer_config_t *rfsniffer_default_config() {
+rfsniffer_config_t* rfsniffer_default_config() {
 	cfg = malloc(sizeof(*cfg));
 	memset(cfg, 0, sizeof(*cfg));
 
@@ -1014,9 +1021,9 @@ rfsniffer_config_t *rfsniffer_default_config() {
 	cfg->sync_on_1 = 0;
 	cfg->sample_on_0 = 1;
 	cfg->sample_on_1 = 0;
-	cfg->sync_min = 1800;
-	cfg->sync_max = 2000;
-	cfg->bitdivider = 1500;
+	cfg->sync_min = 3800;
+	cfg->sync_max = 4200;
+	cfg->bitdivider = 3000;
 	cfg->noise = 100;
 	cfg->verbose = 0;
 	cfg->quiet = 0;
