@@ -6,13 +6,26 @@ $source = '/ram/433/433.json';
 
 $exclude = array(
     'Acurite-986',
-    'Smoke-GS558',
-    'Proove-Security',
-    'Nexa-Security',
-    'Rubicson-Temperature',
-    'Nexus-TH',
-    'Prologue-TH',
+    'Akhan-100F14',
+    'AlectoV1-Temperature',
+    'Ambientweather-F007TH',
+    'DSC-Security',
     'Generic-Temperature',
+    'GT-WT02',
+    'Nexa-Security',
+    'Nexus-TH',
+    'Oregon-CM180i',
+    'Oregon-SL109H',
+    'Proove-Security',
+    'Prologue-TH',
+    'RadioHead-ASK',
+    'Rubicson-Temperature',
+    'Secplus_v1',
+    'SensibleLiving-Moisture',
+    'Smoke-GS558',
+    'Springfield-Soil',
+    'TFA-TwinPlus',
+    'Waveman-Switch',
 );
 
 function temp_f2c($in)
