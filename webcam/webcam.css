@@ -1,6 +1,6 @@
 body {
 	margin: 0;
-	paddung: 0;
+	padding: 0;
 	background-color: white;
 	font-size: 14px;
 	font-family: "Lucida Console", "Courier New", monospace;
@@ -85,7 +85,13 @@ ul li a:hover {
 #lumi {
 	position: absolute;
 	top: 10px;
-	left: 230px;
+	left: 250px;
+}
+
+#baro {
+	position: absolute;
+	top: 10px;
+	left: 370px;
 }
 
 #mtime {

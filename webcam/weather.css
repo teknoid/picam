@@ -1,42 +1,53 @@
 body {
 	margin: 0;
-	paddung: 0;
+	padding: 0;
 	color: black;
 	background-color: white;
 	font-size: 14px;
 	font-family: "Lucida Console", "Courier New", monospace;
 	font-weight: normal;
 	white-space: nowrap;
-	overflow: hidden;
+	overflow: auto;
 	color: #666;
 }
 
-ul {
+ul.nav {
 	margin: 0;
 	padding: 0;
 	border: 1px solid #c8c8c8;
 	border-radius: 5px;
 }
 
-ul li {
+ul.nav li {
 	padding: 0.5em;
 	list-style: none;
 	font-weight: bold;
 	text-decoration: none;
 }
 
-ul li:hover {
+ul.nav li:hover {
 	color: #F60;
 	cursor: pointer;
+}
+
+ul.nav li a:hover {
+	color: #F60;
+}
+
+ul.current {
+	margin: 0;
+	display: inline-block;
+}
+
+ul.current li {
+	list-style: none;
+	display: inline-flex;
+	width: 200px;
 }
 
 a {
 	color: #666;
 	text-decoration: none;
-}
-
-ul li a:hover {
-	color: #F60;
 }
 
 #content {
@@ -46,28 +57,29 @@ ul li a:hover {
 	margin-right: auto;
 }
 
-.current {
-	font-size: 1.25em;
+#current {
+	margin: 3px;
+	padding: 5px;
+	border: 1px solid #666;
+}
+
+.current-label {
+	font-size: 1.1em;
 	font-weight: bold;
 	font-style: italic;
-	border-bottom: 1px solid #666;
-	margin-bottom: 5px;
 	display: inline-block;
-	width: 250px;
+	width: 160px;
 }
 
 .label {
 	display: inline-flex;
-	width: 150px;
+	width: 60px;
 	font-weight: bold;
 }
 
 .value {
 	display: inline-flex;
-}
-
-#sensors {
-	
+	font-weight: normal;
 }
 
 #navigation-top {
