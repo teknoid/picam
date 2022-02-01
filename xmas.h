@@ -1,6 +1,3 @@
-#define XMAS_ON								"/usr/local/bin/flamingo 1 A 1"
-#define XMAS_OFF							"/usr/local/bin/flamingo 1 A 0"
-
 typedef struct timing_t {
 	int active;								// enabled / disabled
 	int wday;								// weekday

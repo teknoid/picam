@@ -4,5 +4,6 @@
 /mcp
 /flamingo
 /mcp3204
+/gpio-bcm2835
 /rfsniffer
 /build/

@@ -3,7 +3,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <errno.h>
-#include <syslog.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <fcntl.h>
@@ -15,6 +14,7 @@
 static pthread_mutex_t mcp3204_lock;
 static int spi_fd;
 
+#ifdef MCP3204_MAIN
 static int mcp3204_main(int argc, char **argv) {
 	mcp3204_init();
 
@@ -27,6 +27,7 @@ static int mcp3204_main(int argc, char **argv) {
 	}
 	return 0;
 }
+#endif
 
 static int spi_init() {
 	uint8_t mode = SPI_MODE_0;
@@ -71,17 +72,19 @@ static int spi_init() {
 
 static int spi(uint8_t *data, int len) {
 	struct spi_ioc_transfer spi;
+
 	memset(&spi, 0, sizeof(spi));
-	spi.tx_buf = (unsigned long) data;
-	spi.rx_buf = (unsigned long) data;
+	spi.tx_buf = (uint32_t) data;
+	spi.rx_buf = (uint32_t) data;
 	spi.len = len;
 	spi.speed_hz = SPI_SPEED;
 	spi.bits_per_word = SPI_BITS;
 	spi.delay_usecs = SPI_DELAY;
+
 	int ret = ioctl(spi_fd, SPI_IOC_MESSAGE(1), &spi);
-	if (ret < 0) {
+	if (ret < 0)
 		printf("SPI_IOC_MESSAGE ioctl error: %s\n", strerror(errno));
-	}
+
 	return ret;
 }
 
@@ -97,9 +100,8 @@ uint16_t mcp3204_read() {
 		data[2] = 0x00;
 
 		ret = spi(data, 3);
-		if (ret < 0) {
+		if (ret < 0)
 			return -1;
-		}
 
 		uint16_t adc12bit = ((data[1] << 8) & 0x0f00) | (data[2] & 0x00ff);
 		sum += adc12bit;
@@ -118,12 +120,12 @@ uint16_t mcp3204_millivolt(uint16_t adc12bit) {
 }
 
 int mcp3204_init() {
-	if (spi_init() < 0) {
+	if (spi_init() < 0)
 		return -1;
-	}
-	if (mcp3204_read() < 0) {
+
+	if (mcp3204_read() < 0)
 		return -1;
-	}
+
 	return 0;
 }
 

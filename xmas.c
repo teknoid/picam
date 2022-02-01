@@ -1,7 +1,6 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
-#include <syslog.h>
 #include <time.h>
 #include <unistd.h>
 #include <sys/mman.h>
@@ -21,20 +20,18 @@ static void* xmas(void *arg);
 static void send_on(const timing_t *timing) {
 	int index = timing->channel - 'A';
 	if (!channel_status[index]) {
-		syslog(LOG_NOTICE, "flamingo_send_FA500 %d %c 1\n", timing->remote, timing->channel);
+		xlog("flamingo_send_FA500 %d %c 1\n", timing->remote, timing->channel);
 		flamingo_send_FA500(timing->remote, timing->channel, 1, -1);
 		channel_status[index] = 1;
-		system(XMAS_ON);
 	}
 }
 
 static void send_off(const timing_t *timing) {
 	int index = timing->channel - 'A';
 	if (channel_status[index]) {
-		syslog(LOG_NOTICE, "flamingo_send_FA500 %d %c 0\n", timing->remote, timing->channel);
+		xlog("flamingo_send_FA500 %d %c 0\n", timing->remote, timing->channel);
 		flamingo_send_FA500(timing->remote, timing->channel, 0, -1);
 		channel_status[index] = 0;
-		system(XMAS_OFF);
 	}
 }
 
@@ -47,35 +44,37 @@ static void process(struct tm *now, const timing_t *timing) {
 	int value;
 
 	if (from <= curr && curr <= to) {
+
 		// ON time frame
 		if (!on) {
 			if (afternoon) {
 				// evening: check if sundown is reached an switch on
-				// syslog(LOG_NOTICE, "in ON time, waiting for XMAS_SUNDOWN");
+				// xlog("in ON time, waiting for XMAS_SUNDOWN");
 				value = mcp3204_read();
 				if (value > XMAS_SUNDOWN) {
-					syslog(LOG_NOTICE, "reached XMAS_SUNDOWN at %d", value);
+					xlog("reached XMAS_SUNDOWN at %d", value);
 					send_on(timing);
 				}
 			} else {
 				// morning: switch on
-				syslog(LOG_NOTICE, "reached ON trigger at %02d:%02d", timing->on_h, timing->on_m);
+				xlog("reached ON trigger at %02d:%02d", timing->on_h, timing->on_m);
 				send_on(timing);
 			}
 		}
 	} else {
+
 		// OFF time frame
 		if (on) {
 			if (afternoon) {
 				// evening: switch off
-				syslog(LOG_NOTICE, "reached OFF trigger at %02d:%02d", timing->off_h, timing->off_m);
+				xlog("reached OFF trigger at %02d:%02d", timing->off_h, timing->off_m);
 				send_off(timing);
 			} else {
 				// morning: check if sunrise is reached an switch off
-				// syslog(LOG_NOTICE, "in OFF time, waiting for XMAS_SUNRISE");
+				// xlog("in OFF time, waiting for XMAS_SUNRISE");
 				value = mcp3204_read();
 				if (value < XMAS_SUNRISE) {
-					syslog(LOG_NOTICE, "reached XMAS_SUNRISE at %d", value);
+					xlog("reached XMAS_SUNRISE at %d", value);
 					send_off(timing);
 				}
 			}
@@ -85,44 +84,36 @@ static void process(struct tm *now, const timing_t *timing) {
 
 int xmas_init() {
 	ZERO(channel_status);
-	if (pthread_create(&thread_xmas, NULL, &xmas, NULL)) {
-		syslog(LOG_WARNING, "Error creating thread");
-	}
+	if (pthread_create(&thread_xmas, NULL, &xmas, NULL))
+		xlog("Error creating thread");
+
 	return 0;
 }
 
 void xmas_close() {
-	if (pthread_cancel(thread_xmas)) {
-		syslog(LOG_WARNING, "Error canceling thread");
-	}
-	if (pthread_join(thread_xmas, NULL)) {
-		syslog(LOG_WARNING, "Error joining thread");
-	}
+	if (pthread_cancel(thread_xmas))
+		xlog("Error canceling thread");
+
+	if (pthread_join(thread_xmas, NULL))
+		xlog("Error joining thread");
 }
 
 static void* xmas(void *arg) {
 	if (pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL)) {
-		syslog(LOG_ERR, "Error setting pthread_setcancelstate");
-		return (void *) 0;
+		xlog("Error setting pthread_setcancelstate");
+		return (void*) 0;
 	}
 
 	int value = mcp3204_read();
 	if (value == 0) {
-		syslog(LOG_NOTICE, "mcp3204_read returned 0 ?");
-		return (void *) 0;
+		xlog("mcp3204_read returned 0 ?");
+		return (void*) 0;
 	}
 
-	// Set our thread to MAX priority
-	struct sched_param sp;
-	memset(&sp, 0, sizeof(sp));
-	sp.sched_priority = sched_get_priority_max(SCHED_FIFO);
-	if (sched_setscheduler(0, SCHED_FIFO, &sp)) {
-		return (void *) 0;
-	}
-
-	// Lock memory to ensure no swapping is done.
-	if (mlockall(MCL_FUTURE | MCL_CURRENT)) {
-		return (void *) 0;
+	// elevate realtime priority for our thread
+	if (elevate_realtime(3) < 0) {
+		xlog("elevate_realtime() error ?");
+		return (void*) 0;
 	}
 
 	while (1) {
@@ -138,7 +129,7 @@ static void* xmas(void *arg) {
 			if (now->tm_wday != timing->wday)
 				continue;
 
-			// syslog(LOG_NOTICE, "processing timing[%i]", i);
+			// xlog("processing timing[%i]", i);
 			process(now, timing);
 		}
 

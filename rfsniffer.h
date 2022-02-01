@@ -19,26 +19,22 @@
 #define NEXUS_SYNC_MAX		4000
 #define NEXUS_DIVIDER		NEXUS_PULSE * 3
 
-// TODO
-typedef struct rfsniffer_protocol_t {
-
-} rfsniffer_protocol_t;
-
 typedef struct rfsniffer_event_t {
-	unsigned short protocol;
-	unsigned long long raw;
-	int device;
-	int channel;
-	int repeat;
-	unsigned char key;
-	int value;
-	unsigned char ikey1;
-	int ivalue1;
-	unsigned char ikey2;
-	int ivalue2;
-	unsigned char ikey3;
-	int ivalue3;
-	unsigned char fkey1;
+	uint64_t raw;
+	uint32_t code;
+	uint16_t device;
+	uint8_t protocol;
+	uint8_t channel;
+	uint8_t repeat;
+	uint8_t key;
+	int16_t value;
+	uint8_t ikey1;
+	int16_t ivalue1;
+	uint8_t ikey2;
+	int16_t ivalue2;
+	uint8_t ikey3;
+	int16_t ivalue3;
+	uint8_t fkey1;
 	float fvalue1;
 	char *message;
 } rfsniffer_event_t;
@@ -46,37 +42,36 @@ typedef struct rfsniffer_event_t {
 typedef void (*rfsniffer_handler_t)(rfsniffer_event_t *event);
 
 typedef struct rfsniffer_config_t {
-	unsigned char rx;
-	unsigned char tx;
-	unsigned char analyzer_mode;
-	unsigned char realtime_mode;
-	unsigned char timestamp;
-	unsigned char pulse_counter_active;
-	unsigned char decoder_delay;
-	unsigned char bits_to_sample;
-	unsigned char collect_identical_codes;
-	unsigned char sync_on_0;
-	unsigned char sync_on_1;
-	unsigned char sample_on_0;
-	unsigned char sample_on_1;
-	unsigned long sync_min;
-	unsigned long sync_max;
-	unsigned long bitdivider;
-	unsigned short noise;
-	unsigned char verbose;
-	unsigned char quiet;
-	unsigned char syslog;
-	unsigned char json;
+	const char *rx;
+	const char *tx;
+	uint8_t analyzer_mode;
+	uint8_t realtime_mode;
+	uint8_t stream_mode;
+	uint8_t timestamp;
+	uint8_t pulse_counter_active;
+	uint8_t decoder_delay;
+	uint8_t bits_to_sample;
+	uint8_t collect_identical_codes;
+	uint8_t sync_on_0;
+	uint8_t sync_on_1;
+	uint8_t sample_on_0;
+	uint8_t sample_on_1;
+	uint32_t sync_min;
+	uint32_t sync_max;
+	uint32_t bitdivider;
+	uint16_t noise;
+	uint8_t verbose;
+	uint8_t validate;
+	uint8_t quiet;
+	uint8_t syslog;
+	uint8_t json;
 	char *sysfslike;
 	rfsniffer_handler_t rfsniffer_handler;
 } rfsniffer_config_t;
 
-rfsniffer_config_t *rfsniffer_default_config();
-void rfsniffer_syslog_handler(rfsniffer_event_t *event);
-void rfsniffer_stdout_handler(rfsniffer_event_t *event);
+rfsniffer_config_t* rfsniffer_default_config();
 int rfsniffer_init();
 int rfsniffer_close();
 
-void rfcodec_decode(unsigned char protocol, unsigned long long code, unsigned char repeat);
-void rfcodec_set_config(rfsniffer_config_t *cfg);
-int rfcodec_test();
+void rfsniffer_syslog_handler(rfsniffer_event_t *event);
+void rfsniffer_stdout_handler(rfsniffer_event_t *event);

@@ -2,19 +2,23 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <stdarg.h>
 #include <string.h>
 #include <errno.h>
 #include <sched.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <syslog.h>
+#include <time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 
 #include "utils.h"
 
-static volatile unsigned long *systReg = 0;
+static int xlog_output = 0;
+static FILE *xlog_file;
 
 //
 // The RT scheduler problem
@@ -23,47 +27,6 @@ static volatile unsigned long *systReg = 0;
 // https://www.codeblueprint.co.uk/2019/10/08/isolcpus-is-deprecated-kinda.html
 // https://www.iot-programmer.com/index.php/books/22-raspberry-pi-and-the-iot-in-c/chapters-raspberry-pi-and-the-iot-in-c/33-raspberry-pi-iot-in-c-almost-realtime-linux
 //
-
-int init_micros() {
-	// based on pigpio source; simplified and re-arranged
-	int fdMem = open("/dev/mem", O_RDWR | O_SYNC);
-	if (fdMem < 0) {
-		perror("Cannot map memory (need sudo?)\n");
-		return -1;
-	}
-	// figure out the address
-	FILE *f = fopen("/proc/cpuinfo", "r");
-	char buf[1024];
-	fgets(buf, sizeof(buf), f); // skip first line
-	fgets(buf, sizeof(buf), f); // model name
-	unsigned long phys = 0;
-	if (strstr(buf, "ARMv6")) {
-		phys = 0x20000000;
-	} else if (strstr(buf, "ARMv7")) {
-		phys = 0x3F000000;
-	} else if (strstr(buf, "ARMv8")) {
-		phys = 0x3F000000;
-	} else {
-		perror("Unknown CPU type\n");
-		return -1;
-	}
-	fclose(f);
-	systReg = (unsigned long *) mmap(0, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_LOCKED, fdMem, phys + 0x3000);
-	return 0;
-}
-
-unsigned long _micros() {
-	return systReg[1];
-}
-
-void delay_micros(unsigned int us) {
-	// usleep() on its own gives latencies 20-40 us; this combination gives < 25 us.
-	unsigned long start = systReg[1];
-	if (us >= 100)
-		usleep(us - 50);
-	while ((systReg[1] - start) < us)
-		;
-}
 
 int elevate_realtime(int cpu) {
 	// Set our thread to MAX priority
@@ -93,11 +56,79 @@ int elevate_realtime(int cpu) {
 	return 0;
 }
 
-char *printbits64(unsigned long long code, unsigned long long spacemask) {
-	unsigned int bits = 64;
+void xlog_init(int output, const char *filename) {
+	xlog_output = output;
+
+	// print to stdout
+	if (output == XLOG_STDOUT)
+		return;
+
+	// write to syslog
+	if (output == XLOG_SYSLOG)
+		return;
+
+	// write to a logfile
+	if (output == XLOG_FILE) {
+		if (xlog_file == 0) {
+			xlog_file = fopen(filename, "a");
+			if (xlog_file == 0) {
+				perror("error opening logfile!");
+				exit(EXIT_FAILURE);
+			}
+		}
+		return;
+	}
+}
+
+void xlog(const char *format, ...) {
+	char BUFFER[256];
+	va_list vargs;
+
+	if (xlog_output == XLOG_STDOUT) {
+		va_start(vargs, format);
+		vsprintf(BUFFER, format, vargs);
+		va_end(vargs);
+		printf(BUFFER);
+		printf("\n");
+		return;
+	}
+
+	if (xlog_output == XLOG_SYSLOG) {
+		va_start(vargs, format);
+		vsprintf(BUFFER, format, vargs);
+		va_end(vargs);
+		syslog(LOG_NOTICE, BUFFER);
+		return;
+	}
+
+	if (xlog_output == XLOG_FILE) {
+		time_t timer;
+		struct tm *tm_info;
+
+		time(&timer);
+		tm_info = localtime(&timer);
+		strftime(BUFFER, 26, "%d.%m.%Y %H:%M:%S", tm_info);
+
+		fprintf(xlog_file, "%s: ", BUFFER);
+		va_start(vargs, format);
+		vfprintf(xlog_file, format, vargs);
+		va_end(vargs);
+		fprintf(xlog_file, "\n");
+		fflush(xlog_file);
+	}
+}
+
+void xlog_close() {
+	if (xlog_file) {
+		fflush(xlog_file);
+		fclose(xlog_file);
+	}
+}
+char* printbits64(uint64_t code, uint64_t spacemask) {
+	uint64_t mask = 0x8000000000000000;
+	uint16_t bits = 64;
 	char *out = malloc(bits * 2 + 1);
 	char *p = out;
-	unsigned long long mask = 0x8000000000000000;
 	while (mask) {
 		if (code & mask) {
 			*p++ = '1';
@@ -113,11 +144,11 @@ char *printbits64(unsigned long long code, unsigned long long spacemask) {
 	return out;
 }
 
-char *printbits(unsigned long code, unsigned long spacemask) {
-	unsigned int bits = 32;
+char* printbits(uint32_t code, uint32_t spacemask) {
+	uint32_t mask = 0x80000000;
+	uint16_t bits = 32;
 	char *out = malloc(bits * 2 + 1);
 	char *p = out;
-	unsigned long mask = 0x80000000;
 	while (mask) {
 		if (code & mask) {
 			*p++ = '1';
@@ -167,7 +198,7 @@ void create_sysfslike(char *dir, char *fname, char *fvalue, const char *fmt, ...
 			strcat(path, cp);
 			break;
 		case 's':
-			c = va_arg(va, char *);
+			c = va_arg(va, char*);
 			strcat(path, c);
 			break;
 		}

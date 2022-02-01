@@ -5,7 +5,7 @@
  * unfortunately this works only if the pi is idle
  * especially there should be no USB traffic during sampling
  *
- * Copyright (C) 04/2021 by teknoid
+ * Copyright (C) 02/2022 by teknoid
  *
  *
  * tested with following devices
@@ -17,28 +17,26 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <poll.h>
 #include <syslog.h>
 
-//#include <bcm2835.h>
-#include <wiringPi.h>
-
 #include "rfsniffer.h"
-#include "flamingo.h"
+#include "rfcodec.h"
 #include "utils.h"
+#include "flamingo.h"
+#include "gpio.h"
 
-// #define RFSNIFFER_MAIN - in Makefile !!!
-
+// odroid
 // #define RX				247
 // #define TX				219
-// #define GPIO_PIN			247	//OdroidC2
 
-#define RX					2
-#define TX					0
-#define GPIO_PIN			27	//RPi2 Pin13 GPIO_GEN2
+// picam
+#define RX					"GPIO27"
+#define TX					"GPIO17"
 
 #define BUFFER				0xff
 
@@ -46,10 +44,13 @@
 
 #define PULSE_COUNTER_MAX	BUFFER * BUFFER
 
-const static char *CLOW = "LOW\0";
-const static char *CHIGH = "HIGH\0";
-const static char *CEDGE = "EDGE\0";
-const static char *CNONE = "NONE\0";
+static const char *CLOW = "LOW\0";
+static const char *CHIGH = "HIGH\0";
+static const char *CEDGE = "EDGE\0";
+static const char *CNONE = "NONE\0";
+
+static const char *handler_fmt1 = "HANDLER Protocol = %d, Raw = 0x%llx, Repeat = %d, Device = 0x%x, Channel = %d, Event = %d, Value = 0x%02x\n";
+static const char *handler_fmt2 = "HANDLER Protocol = %d, Raw = 0x%llx, Repeat = %d, Device = 0x%x, Channel = %d, Event = %d, Value = %02.1f\n";
 
 static pthread_t thread_decoder;
 static void* realtime_decoder(void *arg);
@@ -60,18 +61,18 @@ static void* realtime_sampler(void *arg);
 static void* stream_sampler(void *arg);
 
 // stream_decoder: ring buffers
-static unsigned short lstream[0xffff], hstream[0xffff];
-static unsigned short stream_write, stream_read;
+static uint16_t lstream[0xffff], hstream[0xffff];
+static uint16_t stream_write, stream_read;
 
 // code matrix: x=protocol code, y=code number, [x][0] contains next free entry
-static unsigned long long matrix[BUFFER][BUFFER];
+static uint64_t matrix[BUFFER][BUFFER];
 
 // pulse counters: index equals pulse length, e.g. 10µs=1, 20µs=2, etc
-static unsigned short lpulse_counter[PULSE_COUNTER_MAX];
-static unsigned short hpulse_counter[PULSE_COUNTER_MAX];
+static uint16_t lpulse_counter[PULSE_COUNTER_MAX];
+static uint16_t hpulse_counter[PULSE_COUNTER_MAX];
 
 // realtime_decoder: calculate age of last message
-static unsigned long timestamp_last_code;
+static uint32_t timestamp_last_code;
 
 static rfsniffer_config_t *cfg;
 
@@ -99,7 +100,7 @@ static rfsniffer_config_t *cfg;
 
 #ifdef RFSNIFFER_MAIN
 static int usage() {
-	printf("Usage: rfsniffer -v -q -jX -fX -c -nX -dX -a -r -bX -sX -SX -xX -yX -zX\n");
+	printf("Usage: rfsniffer -v -q -jX -fX -c -nX -dX -a -r -Tc -bX -sX -SX -xX -yX -zX\n");
 	printf("  void  normal mode, sync on known pulses, sample and decode messages\n");
 	printf("  -v    verbose console output\n");
 	printf("  -q    no console output except errors\n");
@@ -112,6 +113,7 @@ static int usage() {
 	printf("  -d X  decoder delay in seconds, default 1\n");
 	printf("  -a    analyzer mode\n");
 	printf("  -r    realtime mode\n");
+	printf("  -T c  run unit tests and decode <c>");
 	printf("  -b X  analyzer: bits to sample (0 - 64) default 32\n");
 	printf("  -s X  analyzer: sync on pulse 0=LOW (default) 1=HIGH 2=EDGE)\n");
 	printf("  -S X  analyzer: sample on pulse 0=LOW (default) 1=HIGH 2=EDGE)\n");
@@ -122,22 +124,15 @@ static int usage() {
 }
 
 static int rfsniffer_main(int argc, char **argv) {
-	// return rfcodec_test();
-
-	// if (!bcm2835_init())
-	if (wiringPiSetup() < 0)
+	if (gpio_init() < 0)
 		return -1;
-
-	// gain RT
-	if (elevate_realtime(3) < 0)
-		return -2;
 
 	// initialize a default configuration
 	cfg = rfsniffer_default_config();
 
 	if (argc > 0) {
 		int c, i;
-		while ((c = getopt(argc, argv, "ab:cd:ef:jn:qrs:S:tvx:y:z:")) != -1) {
+		while ((c = getopt(argc, argv, "ab:cd:ef:jn:qrs:S:tTvx:y:z:")) != -1) {
 			switch (c) {
 			case 'a':
 				cfg->analyzer_mode = 1;
@@ -167,6 +162,7 @@ static int rfsniffer_main(int argc, char **argv) {
 				cfg->quiet = 1;
 				break;
 			case 'r':
+				cfg->stream_mode = 0;
 				cfg->realtime_mode = 1;
 				break;
 			case 's':
@@ -206,6 +202,9 @@ static int rfsniffer_main(int argc, char **argv) {
 			case 't':
 				cfg->timestamp = 1; // TODO
 				break;
+			case 'T':
+				rfcodec_test(argc, argv);
+				return 0;
 			case 'v':
 				cfg->verbose = 1;
 				break;
@@ -231,9 +230,9 @@ static int rfsniffer_main(int argc, char **argv) {
 }
 #endif
 
-static void matrix_decode_protocol(unsigned char x) {
-	unsigned long long code;
-	unsigned char repeat, y = 1;
+static void matrix_decode_protocol(uint8_t x) {
+	uint64_t code;
+	uint8_t repeat, y = 1;
 
 	if (cfg->collect_identical_codes) {
 		// TODO find ALL identical codes, not only when differs
@@ -259,7 +258,7 @@ static void matrix_decode_protocol(unsigned char x) {
 }
 
 static void matrix_decode() {
-	unsigned char x, y, filled = 0;
+	uint8_t x, y, filled = 0;
 
 	// check if empty
 	for (x = 0; x < BUFFER; x++) {
@@ -290,43 +289,41 @@ static void matrix_decode() {
 	}
 }
 
-static void matrix_store(unsigned char x, unsigned long long code) {
-	unsigned char ynext = matrix[x][0];
+static void matrix_store(uint8_t x, uint64_t code) {
+	uint8_t ynext = matrix[x][0];
 	matrix[x][ynext] = code;
 	matrix[x][0]++; // increment next free entry
 }
 
 static void matrix_init() {
 	memset(matrix, 0, sizeof(matrix));
-	for (unsigned char i = 0; i < BUFFER; i++) {
+	for (uint8_t i = 0; i < BUFFER; i++)
 		matrix[i][0] = 1; // initialize next free entry
-	}
 }
 
 static void dump_pulse_counters() {
 	printf("\nLCOUNTER up to 2000µs\n");
-	for (int i = 0; i < 200; i++) {
+	for (int i = 0; i < 200; i++)
 		printf("%02d   ", i);
-	}
+
 	printf("\n");
-	for (int i = 0; i < 200; i++) {
+	for (int i = 0; i < 200; i++)
 		printf("%04u ", lpulse_counter[i]);
-	}
+
 	printf("\n\nHCOUNTER up to 2000µs\n");
-	for (int i = 0; i < 200; i++) {
+	for (int i = 0; i < 200; i++)
 		printf("%02d   ", i);
-	}
+
 	printf("\n");
-	for (int i = 0; i < 200; i++) {
+	for (int i = 0; i < 200; i++)
 		printf("%04u ", hpulse_counter[i]);
-	}
 
 	// calculate top ten pulse lengths
-	unsigned long lmax, hmax;
-	unsigned char lmaxi, hmaxi, i;
-	for (i = 0; i < (cfg->noise / 10); i++) {
+	uint32_t lmax, hmax;
+	uint8_t lmaxi, hmaxi, i;
+	for (i = 0; i < (cfg->noise / 10); i++)
 		lpulse_counter[i] = hpulse_counter[i] = 0;	// ignore noise pulses
-	}
+
 	printf("\n\nTOP-TEN (noise level = %uµs)\n", cfg->noise);
 	for (int m = 0; m < 10; m++) {
 		hmax = lmax = hmaxi = lmaxi = 0;
@@ -340,7 +337,7 @@ static void dump_pulse_counters() {
 				hmaxi = i;
 			}
 		}
-		printf("L%03d %04lu   H%03d %04lu\n", lmaxi, lmax, hmaxi, hmax);
+		printf("L%03d %04u   H%03d %04u\n", lmaxi, lmax, hmaxi, hmax);
 		lpulse_counter[lmaxi] = 0;
 		hpulse_counter[hmaxi] = 0;
 	}
@@ -353,7 +350,7 @@ static void dump_pulse_counters() {
 static void* realtime_decoder(void *arg) {
 	if (pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL)) {
 		perror("Error setting pthread_setcancelstate");
-		return (void *) 0;
+		return (void*) 0;
 	}
 
 	if (!cfg->quiet)
@@ -363,60 +360,56 @@ static void* realtime_decoder(void *arg) {
 		sleep(cfg->decoder_delay);
 
 		// repeating transmission: wait until actual message is minimum 500ms old
-		unsigned long age_last_message = _micros() - timestamp_last_code;
+		uint32_t age_last_message = gpio_micros() - timestamp_last_code;
 		while (age_last_message < 500) {
 			msleep(100);
-			age_last_message = _micros() - timestamp_last_code;
+			age_last_message = gpio_micros() - timestamp_last_code;
 			if (cfg->verbose)
-				printf("DECODER receiving in progress %lums\n", age_last_message);
+				printf("DECODER receiving in progress %ums\n", age_last_message);
 		}
 
 		// print pulse counters,  top ten pulse lengths, clear counters
-		if (cfg->pulse_counter_active) {
+		if (cfg->pulse_counter_active)
 			dump_pulse_counters();
-		}
 
 		matrix_decode();
 	}
-	return (void *) 0;
+	return (void*) 0;
 }
 
 static void* realtime_sampler(void *arg) {
 	if (pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL)) {
 		perror("Error setting pthread_setcancelstate");
-		return (void *) 0;
+		return (void*) 0;
 	}
 
-	// elevate realtime priority
+	// elevate realtime priority for sampler thread
 	if (elevate_realtime(3) < 0)
-		return (void *) 0;
+		return (void*) 0;
 
-	// gpio pin setup (not working - use wiringpi gpio program)
-//	bcm2835_gpio_fsel(GPIO_PIN, BCM2835_GPIO_FSEL_INPT);
-//	bcm2835_gpio_set_pud(GPIO_PIN, BCM2835_GPIO_PUD_UP);
-//	bcm2835_gpio_fen(GPIO_PIN);
-//	bcm2835_gpio_ren(GPIO_PIN);
+	const char *name = RX;
+	while (*name >= 'A')
+		name++;
 
-	char command[BUFFER];
-	sprintf(command, "/usr/bin/gpio edge %d both", GPIO_PIN);
-	system(command);
+	char buf[32];
+	snprintf(buf, 32, "/usr/bin/gpio edge %d both", atoi(name));
+	system(buf);
 
 	// poll setup
-	char buf[32];
-	snprintf(buf, 32, "/sys/class/gpio/gpio%d/value", GPIO_PIN);
+	snprintf(buf, 32, "/sys/class/gpio/gpio%d/value", atoi(name));
 	struct pollfd fdset[1];
 	fdset[0].fd = open(buf, O_RDONLY);
 	fdset[0].events = POLLPRI;
 	fdset[0].revents = 0;
 
-	unsigned long long code;
-	unsigned long pulse, tnow, tlast, divider, p1, p2;
-	unsigned int pulse_counter;
-	unsigned char protocol, state_reset, bits, pin, dummy;
-	short state;
+	uint64_t code;
+	uint32_t pulse, tnow, tlast, divider, p1, p2;
+	uint16_t pulse_counter;
+	uint8_t protocol, state_reset, bits, pin, dummy;
+	int state;
 
 	// initialize tLast for correct 1st pulse calculation
-	tlast = _micros();
+	tlast = gpio_micros();
 
 	// initialize the matrix
 	matrix_init();
@@ -445,7 +438,7 @@ static void* realtime_sampler(void *arg) {
 			csample = CNONE;
 
 		if (cfg->verbose) {
-			const char *fmt = "SAMPLER sync on %lu-%luµs %s pulses, sampling %d %s bits, 0/1 divider pulse length %luµs\n";
+			const char *fmt = "SAMPLER sync on %u-%uµs %s pulses, sampling %d %s bits, 0/1 divider pulse length %uµs\n";
 			printf(fmt, cfg->sync_min, cfg->sync_max, csync, cfg->bits_to_sample, csample, cfg->bitdivider);
 		}
 	}
@@ -455,9 +448,8 @@ static void* realtime_sampler(void *arg) {
 		poll(fdset, 1, -1);
 
 		// sample time + pin state
-		tnow = _micros();
-		// pin = bcm2835_gpio_lev(GPIO_PIN);
-		pin = digitalRead(cfg->rx);
+		tnow = gpio_micros();
+		pin = gpio_get(RX);
 
 		// rewind & clear for next poll
 		lseek(fdset[0].fd, 0, SEEK_SET);
@@ -626,11 +618,11 @@ static void* realtime_sampler(void *arg) {
 			state = -1;
 		}
 	}
-	return (void *) 0;
+	return (void*) 0;
 }
 
-static void stream_dump(unsigned short start, unsigned short positions) {
-	unsigned short i, l, h;
+static void stream_dump(uint16_t start, uint16_t positions) {
+	uint16_t i, l, h;
 	printf("DUMP %05u+%u :: ", start, positions);
 	for (i = 0; i < positions; i++) {
 		l = lstream[start];
@@ -657,9 +649,9 @@ static void stream_dump(unsigned short start, unsigned short positions) {
 //
 // this may require a dummy bit at end of transmission
 //
-static unsigned long long stream_probe_low(unsigned short pos, unsigned char bits, unsigned short divider) {
-	unsigned long long code = 0;
-	unsigned long l, h;
+static uint64_t stream_probe_low(uint16_t pos, uint8_t bits, uint16_t divider) {
+	uint64_t code = 0;
+	uint32_t l, h;
 	for (int i = 0; i < bits; i++) {
 		l = lstream[pos] * 10;
 		h = hstream[pos] * 10;
@@ -681,9 +673,9 @@ static unsigned long long stream_probe_low(unsigned short pos, unsigned char bit
 //     _           ___
 //   _| |___     _|   |_
 //      0             1
-static unsigned long long stream_probe_high(unsigned short pos, unsigned char bits, unsigned short divider) {
-	unsigned long long code = 0;
-	unsigned long l, h;
+static uint64_t stream_probe_high(uint16_t pos, uint8_t bits, uint16_t divider) {
+	uint64_t code = 0;
+	uint32_t l, h;
 	for (int i = 0; i < bits; i++) {
 		l = lstream[pos] * 10;
 		h = hstream[pos] * 10;
@@ -701,8 +693,8 @@ static unsigned long long stream_probe_high(unsigned short pos, unsigned char bi
 }
 
 // rewind stream_write position
-static unsigned short stream_rewind(int positions) {
-	unsigned short current = stream_write;
+static uint16_t stream_rewind(int positions) {
+	uint16_t current = stream_write;
 	for (int i = 0; i < positions; i++)
 		current--;
 	return current;
@@ -719,17 +711,16 @@ static void stream_consume(int positions) {
 static void* stream_decoder(void *arg) {
 	if (pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL)) {
 		perror("Error setting pthread_setcancelstate");
-		return (void *) 0;
+		return (void*) 0;
 	}
 
 	if (!cfg->quiet)
 		printf("DECODER run every %d seconds, %s\n", cfg->decoder_delay, cfg->collect_identical_codes ? "collect identical codes" : "process each code separately");
 
-	unsigned short delta, stream_last;
-	unsigned short i, lshort, hshort, rewind, progress;
-	unsigned long l;
-	// unsigned long h;
-	unsigned long long code;
+	uint64_t code;
+	uint32_t l;
+	// uint32_t h;
+	uint16_t i, lshort, hshort, rewind, progress, delta, stream_last;
 
 	stream_read = 0;
 	while (1) {
@@ -784,7 +775,7 @@ static void* stream_decoder(void *arg) {
 				// only sync on configured pulses
 				if (cfg->sync_min < l && l < cfg->sync_max) {
 					if (cfg->verbose) {
-						printf("DECODER %lu SYNC on ?, ", l);
+						printf("DECODER %u SYNC on ?, ", l);
 						stream_dump(stream_read, 10);
 					}
 					code = stream_probe_low(stream_read, cfg->bits_to_sample, cfg->bitdivider);
@@ -804,7 +795,7 @@ static void* stream_decoder(void *arg) {
 				if (3800 < l && l < 4000) {
 					// not a real sync - it's the pause between 1st and 2nd message - but 1st message is always blurred
 					if (cfg->verbose)
-						printf("DECODER %lu SYNC on NEXUS\n", l);
+						printf("DECODER %u SYNC on NEXUS\n", l);
 					code = stream_probe_low(stream_read, 36, 1500);
 					if (code) {
 						matrix_store(P_NEXUS, code);
@@ -813,7 +804,7 @@ static void* stream_decoder(void *arg) {
 
 				} else if (T1SMIN < l && l < T1SMAX) {
 					if (cfg->verbose)
-						printf("DECODER %lu SYNC on FLAMINGO28\n", l);
+						printf("DECODER %u SYNC on FLAMINGO28\n", l);
 					code = stream_probe_high(stream_read, 28, T1X2);
 					if (code) {
 						matrix_store(P_FLAMINGO28, code);
@@ -822,7 +813,7 @@ static void* stream_decoder(void *arg) {
 
 				} else if (T4SMIN < l && l < T4SMAX) {
 					if (cfg->verbose)
-						printf("DECODER %lu SYNC on FLAMINGO24\n", l);
+						printf("DECODER %u SYNC on FLAMINGO24\n", l);
 					code = stream_probe_high(stream_read, 24, T1X2);
 					if (code) {
 						matrix_store(P_FLAMINGO24, code);
@@ -831,7 +822,7 @@ static void* stream_decoder(void *arg) {
 
 				} else if (2600 < l && l < 2800) {
 					if (cfg->verbose)
-						printf("DECODER %lu SYNC on FLAMINGO32\n", l);
+						printf("DECODER %u SYNC on FLAMINGO32\n", l);
 					code = stream_probe_low(stream_read, 64, T2Y);
 					if (code) {
 						matrix_store(P_FLAMINGO32, code);
@@ -854,42 +845,39 @@ static void* stream_decoder(void *arg) {
 		// store for next round
 		stream_last = stream_read;
 	}
-	return (void *) 0;
+	return (void*) 0;
 }
 
 static void* stream_sampler(void *arg) {
 	if (pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL)) {
 		perror("Error setting pthread_setcancelstate");
-		return (void *) 0;
+		return (void*) 0;
 	}
 
-	// elevate realtime priority
+	// elevate realtime priority for sampler thread
 	if (elevate_realtime(3) < 0)
-		return (void *) 0;
+		return (void*) 0;
 
-	// gpio pin setup (not working - use wiringpi gpio program)
-//	bcm2835_gpio_fsel(GPIO_PIN, BCM2835_GPIO_FSEL_INPT);
-//	bcm2835_gpio_set_pud(GPIO_PIN, BCM2835_GPIO_PUD_UP);
-//	bcm2835_gpio_fen(GPIO_PIN);
-//	bcm2835_gpio_ren(GPIO_PIN);
+	const char *name = RX;
+	while (*name >= 'A')
+		name++;
 
-	char command[BUFFER];
-	sprintf(command, "/usr/bin/gpio edge %d both", GPIO_PIN);
-	system(command);
+	char buf[32];
+	snprintf(buf, 32, "/usr/bin/gpio edge %d both", atoi(name));
+	system(buf);
 
 	// poll setup
-	char buf[32];
-	snprintf(buf, 32, "/sys/class/gpio/gpio%d/value", GPIO_PIN);
+	snprintf(buf, 32, "/sys/class/gpio/gpio%d/value", atoi(name));
 	struct pollfd fdset[1];
 	fdset[0].fd = open(buf, O_RDONLY);
 	fdset[0].events = POLLPRI;
 	fdset[0].revents = 0;
 
-	unsigned long pulse, p1, p2, tnow, tlast;
-	unsigned char pin, dummy;
+	uint32_t pulse, p1, p2, tnow, tlast;
+	uint8_t pin, dummy;
 
 	// initialize tLast for correct 1st pulse calculation
-	tlast = _micros();
+	tlast = gpio_micros();
 
 	// initialize the matrix
 	matrix_init();
@@ -900,9 +888,8 @@ static void* stream_sampler(void *arg) {
 		poll(fdset, 1, -1);
 
 		// sample time + pin state
-		tnow = _micros();
-		// pin = bcm2835_gpio_lev(GPIO_PIN);
-		pin = digitalRead(cfg->rx);
+		tnow = gpio_micros();
+		pin = gpio_get(RX);
 
 		// calculate length of last pulse, store timer value for next calculation
 		pulse = tnow - tlast;
@@ -929,7 +916,7 @@ static void* stream_sampler(void *arg) {
 			p2 = p1 >= 5 ? (pulse - p1 + 10) : (pulse - p1);
 
 			// sample
-			lstream[stream_write] = (unsigned short) p2 / 10;
+			lstream[stream_write] = (uint16_t) p2 / 10;
 			if (cfg->sample_on_0)
 				stream_write++;
 
@@ -950,13 +937,13 @@ static void* stream_sampler(void *arg) {
 			p2 = p1 >= 5 ? (pulse - p1 + 10) : (pulse - p1);
 
 			// sample
-			hstream[stream_write] = (unsigned short) p2 / 10;
+			hstream[stream_write] = (uint16_t) p2 / 10;
 			if (cfg->sample_on_1)
 				stream_write++;
 		}
 	}
 
-	return (void *) 0;
+	return (void*) 0;
 }
 
 void rfsniffer_stdout_handler(rfsniffer_event_t *e) {
@@ -965,18 +952,16 @@ void rfsniffer_stdout_handler(rfsniffer_event_t *e) {
 		printf(e->message);
 	else {
 		// print raw values
-		const char *fmt1 = "HANDLER Protocol = %d, Raw = 0x%llx, Repeat = %d, Device = 0x%x, Channel = %d, Event = %d, Value = 0x%02x\n";
-		const char *fmt2 = "HANDLER Protocol = %d, Raw = 0x%llx, Repeat = %d, Device = 0x%x, Channel = %d, Event = %d, Value = %02.1f\n";
 		if (e->key)
-			printf(fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->key, e->value);
+			printf(handler_fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->key, e->value);
 		if (e->ikey1)
-			printf(fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey1, e->ivalue1);
+			printf(handler_fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey1, e->ivalue1);
 		if (e->ikey2)
-			printf(fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey2, e->ivalue2);
+			printf(handler_fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey2, e->ivalue2);
 		if (e->ikey3)
-			printf(fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey3, e->ivalue3);
+			printf(handler_fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey3, e->ivalue3);
 		if (e->fkey1)
-			printf(fmt2, e->protocol, e->raw, e->repeat, e->device, e->channel, e->fkey1, e->fvalue1);
+			printf(handler_fmt2, e->protocol, e->raw, e->repeat, e->device, e->channel, e->fkey1, e->fvalue1);
 	}
 	free(e);
 }
@@ -987,18 +972,16 @@ void rfsniffer_syslog_handler(rfsniffer_event_t *e) {
 		syslog(LOG_NOTICE, e->message);
 	else {
 		// print raw values
-		const char *fmt1 = "HANDLER Protocol = %d, Raw = 0x%llx, Repeat = %d, Device = 0x%x, Channel = %d, Event = %d, Value = 0x%02x\n";
-		const char *fmt2 = "HANDLER Protocol = %d, Raw = 0x%llx, Repeat = %d, Device = 0x%x, Channel = %d, Event = %d, Value = %02.1f\n";
 		if (e->key)
-			syslog(LOG_NOTICE, fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->key, e->value);
+			syslog(LOG_NOTICE, handler_fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->key, e->value);
 		if (e->ikey1)
-			syslog(LOG_NOTICE, fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey1, e->ivalue1);
+			syslog(LOG_NOTICE, handler_fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey1, e->ivalue1);
 		if (e->ikey2)
-			syslog(LOG_NOTICE, fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey2, e->ivalue2);
+			syslog(LOG_NOTICE, handler_fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey2, e->ivalue2);
 		if (e->ikey3)
-			syslog(LOG_NOTICE, fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey3, e->ivalue3);
+			syslog(LOG_NOTICE, handler_fmt1, e->protocol, e->raw, e->repeat, e->device, e->channel, e->ikey3, e->ivalue3);
 		if (e->fkey1)
-			syslog(LOG_NOTICE, fmt2, e->protocol, e->raw, e->repeat, e->device, e->channel, e->fkey1, e->fvalue1);
+			syslog(LOG_NOTICE, handler_fmt2, e->protocol, e->raw, e->repeat, e->device, e->channel, e->fkey1, e->fvalue1);
 	}
 	free(e);
 }
@@ -1012,6 +995,7 @@ rfsniffer_config_t* rfsniffer_default_config() {
 	cfg->tx = TX;
 	cfg->analyzer_mode = 0;
 	cfg->realtime_mode = 0;
+	cfg->stream_mode = 1;
 	cfg->timestamp = 0;
 	cfg->pulse_counter_active = 0;
 	cfg->decoder_delay = 1;
@@ -1026,32 +1010,33 @@ rfsniffer_config_t* rfsniffer_default_config() {
 	cfg->bitdivider = 3000;
 	cfg->noise = 100;
 	cfg->verbose = 0;
+	cfg->validate = 1;
 	cfg->quiet = 0;
 	cfg->syslog = 0;
 	cfg->json = 0;
 	cfg->sysfslike = 0;
 	cfg->rfsniffer_handler = &rfsniffer_stdout_handler;
 
-	// hand-over to rfcodec module
-	rfcodec_set_config(cfg);
+	// hand over to sub modules
+	rfcodec_cfg(cfg);
+	flamingo_cfg(cfg);
+	nexus_cfg(cfg);
 
 	return cfg;
 }
 
 int rfsniffer_init() {
-	if (!cfg->quiet)
-		printf("INIT test 2x 0xdeadbeef = %s\n", printbits64(0xdeadbeefdeadbeef, 0x0101010101010101));
-
-	if (init_micros())
+	if (gpio_init())
 		return -1;
 
-	void *sampler, *decoder;
+	void *sampler = 0, *decoder = 0;
 	if (cfg->realtime_mode) {
 		sampler = &realtime_sampler;
 		decoder = &realtime_decoder;
 		if (!cfg->quiet)
 			printf("INIT using realtime_sampler and realtime_decoder\n");
-	} else {
+	}
+	if (cfg->stream_mode) {
 		sampler = &stream_sampler;
 		decoder = &stream_decoder;
 		if (!cfg->quiet)
@@ -1059,42 +1044,45 @@ int rfsniffer_init() {
 	}
 
 	// decoder thread
-	if (pthread_create(&thread_decoder, NULL, decoder, NULL)) {
-		perror("Error creating decoder thread");
-		return -1;
+	if (decoder != 0) {
+		if (pthread_create(&thread_decoder, NULL, decoder, NULL)) {
+			perror("Error creating decoder thread");
+			return -1;
+		}
+		if (!cfg->quiet)
+			printf("INIT started decoder thread\n");
 	}
-	if (!cfg->quiet)
-		printf("INIT started decoder thread\n");
 
 	// sampler thread
-	if (pthread_create(&thread_sampler, NULL, sampler, NULL)) {
-		perror("Error creating sampler thread");
-		return -1;
+	if (sampler != 0) {
+		if (pthread_create(&thread_sampler, NULL, sampler, NULL)) {
+			perror("Error creating sampler thread");
+			return -1;
+		}
+		if (!cfg->quiet)
+			printf("INIT started sampler thread\n");
 	}
-	if (!cfg->quiet)
-		printf("INIT started sampler thread\n");
 
 	return 0;
 }
 
 int rfsniffer_close() {
 	if (thread_sampler) {
-		if (pthread_cancel(thread_sampler)) {
+		if (pthread_cancel(thread_sampler))
 			perror("Error canceling thread");
-		}
-		if (pthread_join(thread_sampler, NULL)) {
+
+		if (pthread_join(thread_sampler, NULL))
 			perror("Error joining thread");
-		}
 	}
 
 	if (thread_decoder) {
-		if (pthread_cancel(thread_decoder)) {
+		if (pthread_cancel(thread_decoder))
 			perror("Error canceling thread");
-		}
-		if (pthread_join(thread_decoder, NULL)) {
+
+		if (pthread_join(thread_decoder, NULL))
 			perror("Error joining thread");
-		}
 	}
+
 	free(cfg);
 	return 0;
 }
