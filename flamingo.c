@@ -153,7 +153,6 @@ int flamingo_init() {
 }
 
 void flamingo_close() {
-	free(cfg);
 }
 
 void flamingo_config(void *master) {
