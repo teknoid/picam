@@ -437,12 +437,15 @@ uint32_t gpio_micros() {
 	return timer[1];
 }
 
-uint32_t gpio_micros_since(uint32_t when) {
+uint32_t gpio_micros_since(uint32_t *when) {
 	uint32_t now = timer[1];
-	if (now > when)
-		return now - when;
+	uint32_t elapsed;
+	if (now > *when)
+		elapsed = now - *when;
 	else
-		return 0xffffffff - when + now;
+		elapsed = 0xffffffff - *when + now;
+	*when = now;
+	return elapsed;
 }
 
 int gpio_init() {
