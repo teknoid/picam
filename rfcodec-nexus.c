@@ -10,7 +10,7 @@
 
 #define BUFFER		128
 
-const char *fmt_message = "NEXUS {%d} 0x%08llx id=%d, channel=%d, battery=%s, temp=%02.1fC, hum=%d%%";
+const char *fmt_message = "NEXUS {%d} 0x%08llx id=%d, channel=%d, battery=%s, temp=%02.1fC, hum=%d%%\n";
 
 static rfsniffer_config_t *cfg;
 
@@ -31,7 +31,7 @@ void nexus_decode(uint8_t protocol, uint64_t raw, uint8_t repeat) {
 	uint8_t h = code & 0xff;
 	code >>= 8;
 	code >>= 4; // always 1111 - used for message verification
-	short t_raw = (short) (code & 0x0fff);
+	int t_raw = (int) (code & 0x0fff);
 	code >>= 12;
 	uint8_t c = code & 0x07;
 	code >>= 3;

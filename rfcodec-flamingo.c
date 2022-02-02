@@ -136,9 +136,6 @@ void flamingo28_decode(uint8_t protocol, uint64_t raw, uint8_t repeat) {
 	if (cfg->verbose)
 		printf("F28 %04x %02d %d 0 %s <= 0x%08x <= 0x%08x\n", xmitter, channel, command, printbits(message, SPACEMASK_FA500), message, code);
 
-	if (!cfg->quiet)
-		printf(fmt_message28, repeat, message, xmitter, channel, command, payload, rolling);
-
 	if (cfg->validate) {
 		char valid = 0;
 		for (int i = 0; i < ARRAY_SIZE(REMOTES); i++)
@@ -152,6 +149,9 @@ void flamingo28_decode(uint8_t protocol, uint64_t raw, uint8_t repeat) {
 		if (!valid)
 			return;
 	}
+
+	if (!cfg->quiet)
+		printf(fmt_message28, repeat, message, xmitter, channel, command, payload, rolling);
 
 	if (cfg->json) {
 		char format[BUFFER], craw[12], cid[12];
@@ -198,9 +198,6 @@ void flamingo32_decode(uint8_t protocol, uint64_t raw, uint8_t repeat) {
 	if (cfg->verbose)
 		printf("F32 %04x %02d %d %s <= 0x%08x\n", xmitter, channel, command, printbits(message, SPACEMASK_FA500), message);
 
-	if (!cfg->quiet)
-		printf(fmt_message32, repeat, message, xmitter, channel, command, payload);
-
 	if (cfg->validate) {
 		char valid = 0;
 		for (int i = 0; i < ARRAY_SIZE(REMOTES); i++)
@@ -214,6 +211,9 @@ void flamingo32_decode(uint8_t protocol, uint64_t raw, uint8_t repeat) {
 		if (!valid)
 			return;
 	}
+
+	if (!cfg->quiet)
+		printf(fmt_message32, repeat, message, xmitter, channel, command, payload);
 
 	if (cfg->json) {
 		char format[BUFFER], craw[12], cid[12];
