@@ -403,13 +403,13 @@ static void* realtime_sampler(void *arg) {
 	fdset[0].revents = 0;
 
 	uint64_t code;
-	uint32_t pulse, tnow, tlast, divider, p1, p2;
+	uint32_t pulse, last, divider, p1, p2;
 	uint16_t pulse_counter;
 	uint8_t protocol, state_reset, bits, pin, dummy;
 	int state;
 
 	// initialize tLast for correct 1st pulse calculation
-	tlast = gpio_micros();
+	last = gpio_micros();
 
 	// initialize the matrix
 	matrix_init();
@@ -448,16 +448,12 @@ static void* realtime_sampler(void *arg) {
 		poll(fdset, 1, -1);
 
 		// sample time + pin state
-		tnow = gpio_micros();
+		pulse = gpio_micros_since(&last);
 		pin = gpio_get(RX);
 
 		// rewind & clear for next poll
 		lseek(fdset[0].fd, 0, SEEK_SET);
 		read(fdset[0].fd, &dummy, 1);
-
-		// calculate pulse length
-		pulse = tnow - tlast;
-		tlast = tnow;
 
 		// ignore noise & crap
 		if (pulse < cfg->noise)
@@ -534,7 +530,7 @@ static void* realtime_sampler(void *arg) {
 						code++;
 					if (--bits == 0) {
 						matrix_store(protocol, code);
-						timestamp_last_code = tnow;
+						timestamp_last_code = last;
 						state = -1;
 					} else
 						code <<= 1;
@@ -548,7 +544,7 @@ static void* realtime_sampler(void *arg) {
 						code++;
 					if (--bits == 0) {
 						matrix_store(protocol, code);
-						timestamp_last_code = tnow;
+						timestamp_last_code = last;
 						state = -1;
 					} else
 						code <<= 1;
@@ -589,7 +585,7 @@ static void* realtime_sampler(void *arg) {
 							code++;
 						if (--bits == 0) {
 							matrix_store(P_ANALYZE, code);
-							timestamp_last_code = tnow;
+							timestamp_last_code = last;
 							state = -2; // back to analyzer sync mode
 							printf("\n");
 						} else
@@ -603,7 +599,7 @@ static void* realtime_sampler(void *arg) {
 							code++;
 						if (--bits == 0) {
 							matrix_store(P_ANALYZE, code);
-							timestamp_last_code = tnow;
+							timestamp_last_code = last;
 							state = -2; // back to analyzer sync mode
 							printf("\n");
 						} else
@@ -873,11 +869,11 @@ static void* stream_sampler(void *arg) {
 	fdset[0].events = POLLPRI;
 	fdset[0].revents = 0;
 
-	uint32_t pulse, p1, p2, tnow, tlast;
+	uint32_t pulse, p1, p2, last;
 	uint8_t pin, dummy;
 
 	// initialize tLast for correct 1st pulse calculation
-	tlast = gpio_micros();
+	last = gpio_micros();
 
 	// initialize the matrix
 	matrix_init();
@@ -888,12 +884,8 @@ static void* stream_sampler(void *arg) {
 		poll(fdset, 1, -1);
 
 		// sample time + pin state
-		tnow = gpio_micros();
+		pulse = gpio_micros_since(&last);
 		pin = gpio_get(RX);
-
-		// calculate length of last pulse, store timer value for next calculation
-		pulse = tnow - tlast;
-		tlast = tnow;
 
 		// rewind & clear for next poll
 		lseek(fdset[0].fd, 0, SEEK_SET);
@@ -1015,7 +1007,7 @@ rfsniffer_config_t* rfsniffer_default_config() {
 	cfg->syslog = 0;
 	cfg->json = 0;
 	cfg->sysfslike = 0;
-	cfg->rfsniffer_handler = &rfsniffer_stdout_handler;
+//	cfg->rfsniffer_handler = &rfsniffer_stdout_handler;
 
 	// hand over to sub modules
 	rfcodec_cfg(cfg);
