@@ -52,7 +52,7 @@ static const uint8_t DKEY[16] = { 5, 12, 6, 2, 8, 11, 1, 10, 3, 0, 4, 14, 7, 15,
 static const char *fmt_message28 = "FLAMINGO28 {%d} 0x%08lx id=%04x, chan=%02d, cmd=%d, pay=0x%02x, roll=%d\n";
 static const char *fmt_message32 = "FLAMINGO32 {%d} 0x%08lx id=%04x, chan=%02d, cmd=%d, pay=0x%02x\n";
 
-static rfsniffer_config_t *cfg;
+extern rfsniffer_config_t *rfcfg;
 
 static void flamingo_test_handler(rfsniffer_event_t *e) {
 	// re-encode the message for visual compare
@@ -133,27 +133,27 @@ void flamingo28_decode(uint8_t protocol, uint64_t raw, uint8_t repeat) {
 	uint8_t command = (message >> 4) & 0x03;
 	uint8_t channel = message & 0x0F;
 
-	if (cfg->verbose)
+	if (rfcfg->verbose)
 		printf("F28 %04x %02d %d 0 %s <= 0x%08x <= 0x%08x\n", xmitter, channel, command, printbits(message, SPACEMASK_FA500), message, code);
 
-	if (cfg->validate) {
+	if (rfcfg->validate) {
 		char valid = 0;
 		for (int i = 0; i < ARRAY_SIZE(REMOTES); i++)
 			if (xmitter == REMOTES[i])
 				valid = 1;
 
 		if (!valid)
-			if (cfg->verbose)
+			if (rfcfg->verbose)
 				printf("FLAMINGO28 discard message, unknown transmitter ID 0x%02x\n", xmitter);
 
 		if (!valid)
 			return;
 	}
 
-	if (!cfg->quiet)
+	if (!rfcfg->quiet)
 		printf(fmt_message28, repeat, message, xmitter, channel, command, payload, rolling);
 
-	if (cfg->json) {
+	if (rfcfg->json) {
 		char format[BUFFER], craw[12], cid[12];
 		snprintf(craw, 12, "0x%08llx", raw);
 		snprintf(cid, 12, "0x%04x", xmitter);
@@ -162,7 +162,7 @@ void flamingo28_decode(uint8_t protocol, uint64_t raw, uint8_t repeat) {
 		json_printf(&jout, format, "type", "FLAMINGO28", "raw", craw, "id", cid, "channel", channel, "command", command, "payload", payload, "rolling", rolling);
 	}
 
-	if (cfg->rfsniffer_handler) {
+	if (rfcfg->rfsniffer_handler) {
 		rfsniffer_event_t *e = malloc(sizeof(*e));
 		memset(e, 0, sizeof(*e));
 
@@ -183,7 +183,7 @@ void flamingo28_decode(uint8_t protocol, uint64_t raw, uint8_t repeat) {
 		snprintf(cmessage, BUFFER, fmt_message28, repeat, message, xmitter, channel, command, payload, rolling);
 		e->message = cmessage;
 
-		(cfg->rfsniffer_handler)(e);
+		(rfcfg->rfsniffer_handler)(e);
 	}
 }
 
@@ -195,27 +195,27 @@ void flamingo32_decode(uint8_t protocol, uint64_t raw, uint8_t repeat) {
 	uint8_t command = (message >> 4) & 0x0F;
 	uint8_t channel = message & 0x0F;
 
-	if (cfg->verbose)
+	if (rfcfg->verbose)
 		printf("F32 %04x %02d %d %s <= 0x%08x\n", xmitter, channel, command, printbits(message, SPACEMASK_FA500), message);
 
-	if (cfg->validate) {
+	if (rfcfg->validate) {
 		char valid = 0;
 		for (int i = 0; i < ARRAY_SIZE(REMOTES); i++)
 			if (xmitter == REMOTES[i])
 				valid = 1;
 
 		if (!valid)
-			if (cfg->verbose)
+			if (rfcfg->verbose)
 				printf("FLAMINGO32 discard message, unknown transmitter ID 0x%02x\n", xmitter);
 
 		if (!valid)
 			return;
 	}
 
-	if (!cfg->quiet)
+	if (!rfcfg->quiet)
 		printf(fmt_message32, repeat, message, xmitter, channel, command, payload);
 
-	if (cfg->json) {
+	if (rfcfg->json) {
 		char format[BUFFER], craw[12], cid[12];
 		snprintf(craw, 12, "0x%08x", message);
 		snprintf(cid, 12, "0x%04x", xmitter);
@@ -224,7 +224,7 @@ void flamingo32_decode(uint8_t protocol, uint64_t raw, uint8_t repeat) {
 		json_printf(&jout, format, "type", "FLAMINGO32", "raw", craw, "id", cid, "channel", channel, "command", command, "payload", payload);
 	}
 
-	if (cfg->rfsniffer_handler) {
+	if (rfcfg->rfsniffer_handler) {
 		rfsniffer_event_t *e = malloc(sizeof(*e));
 		memset(e, 0, sizeof(*e));
 
@@ -243,7 +243,7 @@ void flamingo32_decode(uint8_t protocol, uint64_t raw, uint8_t repeat) {
 		snprintf(cmessage, BUFFER, fmt_message32, repeat, message, xmitter, channel, command, payload);
 		e->message = cmessage;
 
-		(cfg->rfsniffer_handler)(e);
+		(rfcfg->rfsniffer_handler)(e);
 	}
 }
 
@@ -251,7 +251,7 @@ void flamingo24_decode(uint8_t protocol, uint64_t raw, uint8_t repeat) {
 
 	// TODO decode
 
-	if (cfg->json) {
+	if (rfcfg->json) {
 		char format[BUFFER], craw[12];
 		snprintf(craw, 12, "0x%08llx", raw);
 		struct json_out jout = JSON_OUT_FILE(stdout);
@@ -259,7 +259,7 @@ void flamingo24_decode(uint8_t protocol, uint64_t raw, uint8_t repeat) {
 		json_printf(&jout, format, "type", "FLAMINGO24", "raw", craw);
 	}
 
-	if (cfg->rfsniffer_handler) {
+	if (rfcfg->rfsniffer_handler) {
 		rfsniffer_event_t *e = malloc(sizeof(*e));
 		e->protocol = protocol;
 		e->repeat = repeat;
@@ -271,10 +271,10 @@ uint32_t flamingo28_encode(uint16_t xmitter, char channel, char command, char pa
 	uint32_t message = (payload & 0x0F) << 24 | xmitter << 8 | (rolling << 6 & 0xC0) | (command & 0x03) << 4 | (channel & 0x0F);
 	uint32_t code = encrypt(message);
 
-	if (cfg->verbose)
+	if (rfcfg->verbose)
 		printf("F28 %04x %02d %d %d %s => 0x%08x => 0x%08x\n", xmitter, channel, command, rolling, printbits(message, SPACEMASK_FA500), message, code);
 
-	if (!cfg->quiet)
+	if (!rfcfg->quiet)
 		printf(fmt_message28, 0, code, xmitter, channel, command, payload, rolling);
 
 	return code;
@@ -283,10 +283,10 @@ uint32_t flamingo28_encode(uint16_t xmitter, char channel, char command, char pa
 uint32_t flamingo32_encode(uint16_t xmitter, char channel, char command, char payload) {
 	uint32_t message = (payload & 0x0F) << 24 | xmitter << 8 | (command & 0x0F) << 4 | (channel & 0x0F);
 
-	if (cfg->verbose)
+	if (rfcfg->verbose)
 		printf("F32 %04x %02d %d %s => 0x%08x\n", xmitter, channel, command, printbits(message, SPACEMASK_FA500), message);
 
-	if (!cfg->quiet)
+	if (!rfcfg->quiet)
 		printf(fmt_message32, 0, message, xmitter, channel, command, payload);
 
 	return message;
@@ -305,8 +305,8 @@ int flamingo_test(int argc, char **argv) {
 	uint32_t code, message;
 
 	// modify configuration for our test procedure
-	cfg->rfsniffer_handler = &flamingo_test_handler;
-	cfg->validate = 0;
+	rfcfg->rfsniffer_handler = &flamingo_test_handler;
+	rfcfg->validate = 0;
 
 	printf("\n*** test message encode + decode + re-encode ***\n");
 	code = flamingo28_encode(REMOTES[0], 2, 1, 0x05, 0);
@@ -343,8 +343,4 @@ int flamingo_test(int argc, char **argv) {
 			}
 
 	return EXIT_SUCCESS;
-}
-
-void flamingo_cfg(rfsniffer_config_t *master) {
-	cfg = master;
 }

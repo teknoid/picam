@@ -44,22 +44,22 @@ typedef void (*rfsniffer_handler_t)(rfsniffer_event_t *event);
 typedef struct rfsniffer_config_t {
 	const char *rx;
 	const char *tx;
+	uint32_t sync_min;
+	uint32_t sync_max;
+	uint32_t bitdivider;
+	uint16_t noise;
+	uint16_t decoder_delay;
 	uint8_t analyzer_mode;
 	uint8_t realtime_mode;
 	uint8_t stream_mode;
 	uint8_t timestamp;
 	uint8_t pulse_counter_active;
-	uint8_t decoder_delay;
 	uint8_t bits_to_sample;
 	uint8_t collect_identical_codes;
 	uint8_t sync_on_0;
 	uint8_t sync_on_1;
 	uint8_t sample_on_0;
 	uint8_t sample_on_1;
-	uint32_t sync_min;
-	uint32_t sync_max;
-	uint32_t bitdivider;
-	uint16_t noise;
 	uint8_t verbose;
 	uint8_t validate;
 	uint8_t quiet;
@@ -75,3 +75,14 @@ int rfsniffer_close();
 
 void rfsniffer_syslog_handler(rfsniffer_event_t *event);
 void rfsniffer_stdout_handler(rfsniffer_event_t *event);
+
+void* realtime_decoder(void *arg);
+void* stream_decoder(void *arg);
+
+void* realtime_sampler(void *arg);
+void* stream_sampler(void *arg);
+
+void matrix_init();
+void matrix_store(uint8_t x, uint64_t code);
+void matrix_decode();
+void matrix_decode_protocol(uint8_t x);

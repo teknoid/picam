@@ -1,7 +1,6 @@
 /*
  *  main
  */
-void rfcodec_cfg(rfsniffer_config_t *master);
 void rfcodec_decode(uint8_t protocol, uint64_t code, uint8_t repeat);
 void rfcodec_test(int argc, char **argv);
 uint32_t rfcodec_decode_0110(uint64_t in);
@@ -10,14 +9,12 @@ uint32_t rfcodec_decode_0110(uint64_t in);
  *  nexus part
  */
 int nexus_test(int argc, char **argv);
-void nexus_cfg(rfsniffer_config_t *master);
 void nexus_decode(uint8_t protocol, uint64_t raw, uint8_t repeat);
 
 /*
  *  flamingo part
  */
 int flamingo_test(int argc, char **argv);
-void flamingo_cfg(rfsniffer_config_t *master);
 
 void flamingo28_decode(uint8_t protocol, uint64_t raw, uint8_t repeat);
 void flamingo24_decode(uint8_t protocol, uint64_t raw, uint8_t repeat);

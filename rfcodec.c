@@ -16,10 +16,10 @@
 #include "utils.h"
 #include "frozen.h"
 
-static rfsniffer_config_t *cfg;
+extern rfsniffer_config_t *rfcfg;
 
 static void anaylzer_decode(uint8_t protocol, uint64_t raw, uint8_t r) {
-	if (!cfg->quiet)
+	if (!rfcfg->quiet)
 		xlog("ANALYZER 0x%08llx %s", raw, printbits64(raw, 0x0101010101010101));
 }
 
@@ -41,7 +41,7 @@ uint32_t rfcodec_decode_0110(uint64_t in) {
 			out += 1;
 			break;
 		default:
-			if (cfg->verbose)
+			if (rfcfg->verbose)
 				xlog("01/10 decoder error %s", printbits64(in, 0x0001000100010001));
 			return 0;
 		}
@@ -55,7 +55,7 @@ uint32_t rfcodec_decode_0110(uint64_t in) {
 
 void rfcodec_decode(uint8_t protocol, uint64_t code, uint8_t repeat) {
 	if (!code)
-		if (cfg->verbose)
+		if (rfcfg->verbose)
 			xlog("DECODE received empty message");
 
 	if (!code)
@@ -77,7 +77,7 @@ void rfcodec_decode(uint8_t protocol, uint64_t code, uint8_t repeat) {
 	case P_ANALYZE:
 		return anaylzer_decode(protocol, code, repeat);
 	default:
-		if (!cfg->quiet)
+		if (!rfcfg->quiet)
 			xlog("DECODE no decoder configured for protocol %d 0x%0llx", protocol, code);
 	}
 }
@@ -96,8 +96,4 @@ void rfcodec_test(int argc, char **argv) {
 	// test sub modules
 	nexus_test(argc, argv);
 	flamingo_test(argc, argv);
-}
-
-void rfcodec_cfg(rfsniffer_config_t *master) {
-	cfg = master;
 }

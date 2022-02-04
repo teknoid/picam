@@ -139,7 +139,7 @@ static void test_timers() {
 	uint32_t delay = 1813594;
 	uint32_t begin = gpio_micros();
 	usleep(delay);
-	uint32_t elapsed = gpio_micros_since(begin);
+	uint32_t elapsed = gpio_micros_since(&begin);
 	printf("usleep %u T1 elapsed = %u\n", delay, elapsed);
 }
 

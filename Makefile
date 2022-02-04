@@ -5,22 +5,25 @@ LIBS = -lpthread -lrt
 SRCS = $(wildcard *.c)
 OBJS = $(SRCS:.c=.o)
 
+COBJS-COMMON	= utils.o
+COBJS-RFSNIFFER	= rfsniffer.o rfsniffer-stream.o rfsniffer-realtime.o rfcodec.o rfcodec-nexus.o rfcodec-flamingo.o 
+
 all: clean mcp mcp3204 flamingo rfsniffer gpio-bcm2835
 
-mcp: mcp.o utils.o gpio-bcm2835.o lumi.o xmas.o mcp3204.o webcam.o flamingo.o rfsniffer.o rfcodec.o rfcodec-nexus.o rfcodec-flamingo.o frozen.o
-	$(CC) $(CFLAGS) -o mcp mcp.o utils.o gpio-bcm2835.o lumi.o xmas.o mcp3204.o webcam.o flamingo.o rfsniffer.o rfcodec.o rfcodec-nexus.o rfcodec-flamingo.o frozen.o $(LIBS)
+mcp: mcp.o gpio-bcm2835.o lumi.o xmas.o mcp3204.o webcam.o flamingo.o frozen.o $(COBJS-COMMON) $(COBJS-RFSNIFFER)
+	$(CC) $(CFLAGS) -o mcp mcp.o gpio-bcm2835.o lumi.o xmas.o mcp3204.o webcam.o flamingo.o frozen.o $(COBJS-COMMON) $(COBJS-RFSNIFFER) $(LIBS)
 
-mcp3204: mcp3204.o utils.o
+mcp3204: mcp3204.o $(COBJS-COMMON)
 	$(CC) $(CFLAGS) -DMCP3204_MAIN -c mcp3204.c
-	$(CC) $(CFLAGS) -o mcp3204 mcp3204.o utils.o $(LIBS)
+	$(CC) $(CFLAGS) -o mcp3204 mcp3204.o $(COBJS-COMMON) $(LIBS)
 
-flamingo: flamingo.o rfsniffer.o rfcodec.o rfcodec-nexus.o rfcodec-flamingo.o utils.o frozen.o gpio-bcm2835.o
+flamingo: flamingo.o frozen.o gpio-bcm2835.o $(COBJS-COMMON) $(COBJS-RFSNIFFER)
 	$(CC) $(CFLAGS) -DFLAMINGO_MAIN -c flamingo.c
-	$(CC) $(CFLAGS) -o flamingo flamingo.o rfsniffer.o rfcodec.o rfcodec-nexus.o rfcodec-flamingo.o utils.o frozen.o gpio-bcm2835.o $(LIBS)
+	$(CC) $(CFLAGS) -o flamingo flamingo.o frozen.o gpio-bcm2835.o $(COBJS-COMMON) $(COBJS-RFSNIFFER) $(LIBS)
 
-rfsniffer: rfsniffer.o rfcodec.o rfcodec-nexus.o rfcodec-flamingo.o utils.o frozen.o gpio-bcm2835.o
+rfsniffer: frozen.o gpio-bcm2835.o $(COBJS-COMMON) $(COBJS-RFSNIFFER)
 	$(CC) $(CFLAGS) -DRFSNIFFER_MAIN -c rfsniffer.c
-	$(CC) $(CFLAGS) -o rfsniffer rfsniffer.o rfcodec.o rfcodec-nexus.o rfcodec-flamingo.o utils.o frozen.o gpio-bcm2835.o $(LIBS)
+	$(CC) $(CFLAGS) -o rfsniffer frozen.o gpio-bcm2835.o $(COBJS-COMMON) $(COBJS-RFSNIFFER) $(LIBS)
 
 gpio-bcm2835: gpio-bcm2835.o
 	$(CC) $(CFLAGS) -DGPIO_MAIN -c gpio-bcm2835.c -Wno-unused-function 

@@ -3,6 +3,7 @@
 #define XLOG_FILE					2
 
 #define SPACEMASK					0x01010101
+#define SPACEMASK64					0x0101010101010101
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
 
