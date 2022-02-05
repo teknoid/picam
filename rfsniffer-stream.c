@@ -21,35 +21,52 @@ static uint8_t lstream[0xffff], hstream[0xffff];
 static uint16_t streampointer;
 
 // pulse counters: index equals pulse length x 100, e.g. 1=100µs, 2=200µs ... 255=25500µs
-static uint16_t lpulse_counter[BUFFER];
-static uint16_t hpulse_counter[BUFFER];
+static uint16_t lpulse_counter[BUFFER], ltop_count[PULSE_TOP_X], ltop_pulse[PULSE_TOP_X];
+static uint16_t hpulse_counter[BUFFER], htop_count[PULSE_TOP_X], htop_pulse[PULSE_TOP_X];
 
 extern rfsniffer_config_t *rfcfg;
 
-static void dump_pulse_counters() {
-	printf("\nLCOUNTER   ");
+static void dump_pulse_counter() {
+	printf("LCOUNTER ");
 	for (int i = 0; i < BUFFER; i++)
 		if (lpulse_counter[i])
 			printf("%d:%d ", i, lpulse_counter[i]);
 	printf("\n");
 
-	printf("HCOUNTER   ");
+	printf("HCOUNTER ");
 	for (int i = 0; i < BUFFER; i++)
 		if (hpulse_counter[i])
 			printf("%d:%d ", i, hpulse_counter[i]);
 	printf("\n");
+	printf("\n");
 }
 
-static void dump_stream(uint16_t start, uint16_t stopp) {
-	uint8_t l, h;
-	uint16_t count = (stopp > start) ? stopp - start : 0xffff - start + stopp;
-	printf("DUMP %05u+%u :: ", start, count);
-	while (start != stopp) {
-		l = lstream[start];
-		h = hstream[start];
-		start++;
-		printf("H%03u L%03u ", h, l);
-	}
+static void dump_stream(uint16_t start, uint16_t stopp, uint16_t block_start) {
+	uint16_t p, count = (stopp > start) ? stopp - start : 0xffff - start + stopp;
+
+	p = start;
+	printf("DUMP %05u+%2u ", start, count);
+	while (p++ != block_start)
+		printf("---");
+	printf(" ▼\n");
+
+	p = start;
+	printf("LSTREAM       ");
+	while (p++ != stopp)
+		printf("%2d ", lstream[p] < 100 ? lstream[p] : 99);
+	printf("\n");
+
+	p = start;
+	printf("HSTREAM       ");
+	while (p++ != stopp)
+		printf("%2d ", hstream[p] < 100 ? hstream[p] : 99);
+	printf("\n");
+	printf("\n");
+}
+
+static void dump_topx() {
+	for (int t = 0; t < PULSE_TOP_X; t++)
+		printf("TOP%d     L %03d:%02d H %03d:%02d\n", t + 1, ltop_pulse[t], ltop_count[t], htop_pulse[t], htop_count[t]);
 	printf("\n");
 }
 
@@ -184,8 +201,7 @@ static uint16_t stream_stopp_sequence(uint8_t *stream, uint16_t start, uint16_t 
 }
 
 static void stream_count_pulses(uint16_t start, uint16_t stopp) {
-	uint16_t lmaxc, hmaxc, ltop_count[PULSE_TOP_X], htop_count[PULSE_TOP_X];
-	uint8_t l, h, lmaxp, hmaxp, ltop_pulse[PULSE_TOP_X], htop_pulse[PULSE_TOP_X];
+	uint16_t l, h, lmaxc, hmaxc, lmaxp, hmaxp;
 
 	// clear pulse counters
 	memset(lpulse_counter, 0, sizeof(lpulse_counter));
@@ -218,16 +234,14 @@ static void stream_count_pulses(uint16_t start, uint16_t stopp) {
 		ltop_pulse[t] = lmaxp;
 		htop_count[t] = hmaxc;
 		htop_pulse[t] = hmaxp;
-		lpulse_counter[lmaxp] = 0;
-		hpulse_counter[hmaxp] = 0;
+		lpulse_counter[lmaxp] = 0; // not detect again
+		hpulse_counter[hmaxp] = 0; // not detect again
 	}
 
-	// put top pulse length into odd and top pulse count into even index
+	// write back top-x pulse counters
 	for (int t = 0; t < PULSE_TOP_X; t++) {
-		lpulse_counter[2 * t] = ltop_pulse[t];
-		lpulse_counter[2 * t + 1] = ltop_count[t];
-		hpulse_counter[2 * t] = htop_pulse[t];
-		hpulse_counter[2 * t + 1] = htop_count[t];
+		lpulse_counter[ltop_pulse[t]] = ltop_count[t];
+		hpulse_counter[htop_pulse[t]] = htop_count[t];
 	}
 }
 
@@ -238,7 +252,8 @@ void* stream_decoder(void *arg) {
 	}
 
 	if (!rfcfg->quiet)
-		printf("DECODER run every %d µs, %s\n", rfcfg->decoder_delay, rfcfg->collect_identical_codes ? "collect identical codes" : "process each code separately");
+		printf("DECODER run every %d ms, noise level %d µs, %s\n", rfcfg->decoder_delay, rfcfg->noise,
+				rfcfg->collect_identical_codes ? "collect identical codes" : "process each code separately");
 
 	uint16_t start, stopp, count, i, streampointer_last = 0;
 	uint8_t l, h;
@@ -246,17 +261,17 @@ void* stream_decoder(void *arg) {
 	while (1) {
 		msleep(rfcfg->decoder_delay);
 
-		// if we see ~8 pulses between 300-5000µs we assume receiving is in progress, so wait another 100ms
+		// if we see ~8 pulses between 200-5000µs we assume receiving is in progress, so wait another 100ms
 		while (1) {
 			start = stream_rewind(streampointer, 8);
 			int valid = 0;
 			for (i = 0; i < 8; i++) {
 				l = lstream[start];
-				if (3 < l && l < 50)
+				if (2 < l && l < 50)
 					valid++;
 
 				h = hstream[start];
-				if (3 < h && h < 50)
+				if (2 < h && h < 50)
 					valid++;
 			}
 
@@ -265,7 +280,7 @@ void* stream_decoder(void *arg) {
 				break;
 
 			if (rfcfg->verbose)
-				printf("DECODER receiving in progress, wait\n");
+				printf("DECODER receiving\n");
 
 			// wait and check again
 			msleep(100);
@@ -276,7 +291,7 @@ void* stream_decoder(void *arg) {
 		stopp = streampointer;
 
 		if (rfcfg->verbose)
-			printf("DECODER analyze [%05u:%05u] %u samples\n", start, stopp, stream_distance(start, stopp));
+			printf("DECODER analyzing [%05u:%05u] %u samples\n", start, stopp, stream_distance(start, stopp));
 
 		while (1) {
 			count = stream_distance(start, stopp);
@@ -288,22 +303,22 @@ void* stream_decoder(void *arg) {
 			uint16_t block = stream_forward(start, BLOCKSIZE);
 			stream_count_pulses(start, block);
 
-			uint8_t l1p = lpulse_counter[0], l2p = lpulse_counter[2], l3p = lpulse_counter[4];
-			uint8_t l1c = lpulse_counter[1], l2c = lpulse_counter[3], l3c = lpulse_counter[5];
-			if ((l1c + l2c + l3c) < BLOCKSIZE / 2) {
+			if ((ltop_count[0] + ltop_count[1] + ltop_count[2]) < BLOCKSIZE / 2) {
 				// we found only noise -> forward half blocksize and analyze next block
 				start = stream_forward(start, BLOCKSIZE / 2);
 				continue;
 			}
 
-			if (rfcfg->verbose)
-				for (int t = 0; t < 3; t++)
-					printf("TOP%d: L %03d:%02d H %03d:%02d\n", t + 1, lpulse_counter[2 * t], lpulse_counter[2 * t + 1], hpulse_counter[2 * t], hpulse_counter[2 * t + 1]);
-
 			// find the block with all top-3 pulses
 			uint16_t block_start = 0, block_stopp = 0;
-			block_start = stream_start_sequence(lstream, start, stopp, l1p, l2p, l3p);
-			block_stopp = stream_stopp_sequence(lstream, block_start, stopp, l1p, l2p, l3p);
+			block_start = stream_start_sequence(lstream, start, stopp, ltop_pulse[0], ltop_pulse[1], ltop_pulse[2]);
+			block_stopp = stream_stopp_sequence(lstream, block_start, stopp, ltop_pulse[0], ltop_pulse[1], ltop_pulse[2]);
+
+			if (rfcfg->verbose) {
+				dump_stream(start, block, block_start);
+				dump_pulse_counter();
+				dump_topx();
+			}
 
 			// validate block window
 			if (block_start == 0 || block_stopp == 0) {
@@ -331,7 +346,7 @@ void* stream_sampler(void *arg) {
 		return (void*) 0;
 	}
 
-// elevate realtime priority for sampler thread
+	// elevate realtime priority for sampler thread
 	if (elevate_realtime(3) < 0)
 		return (void*) 0;
 
