@@ -13,60 +13,65 @@
 
 #define BUFFER				0xff
 #define BLOCKSIZE			64
+#define SYMBOLS				8
 
-#define PULSE_TOP_X			5
-
-// stream_decoder: ring buffers
+// ring buffers for low and high pulses
 static uint8_t lstream[0xffff], hstream[0xffff];
 static uint16_t streampointer;
 
-// pulse counters: index equals pulse length x 100, e.g. 1=100µs, 2=200µs ... 255=25500µs
-static uint16_t lpulse_counter[BUFFER], ltop_count[PULSE_TOP_X], ltop_pulse[PULSE_TOP_X];
-static uint16_t hpulse_counter[BUFFER], htop_count[PULSE_TOP_X], htop_pulse[PULSE_TOP_X];
-
 extern rfsniffer_config_t *rfcfg;
 
-static void dump_pulse_counter() {
-	printf("LCOUNTER ");
-	for (int i = 0; i < BUFFER; i++)
-		if (lpulse_counter[i])
-			printf("%d:%d ", i, lpulse_counter[i]);
-	printf("\n");
-
-	printf("HCOUNTER ");
-	for (int i = 0; i < BUFFER; i++)
-		if (hpulse_counter[i])
-			printf("%d:%d ", i, hpulse_counter[i]);
-	printf("\n");
-	printf("\n");
+// rewind stream to position
+static uint16_t backward(uint16_t start, uint16_t positions) {
+	for (int i = 0; i < positions; i++)
+		start--;
+	return start;
 }
 
-static void dump_stream(uint16_t start, uint16_t stopp, uint16_t block_start) {
-	uint16_t p, count = (stopp > start) ? stopp - start : 0xffff - start + stopp;
-
-	p = start;
-	printf("DUMP %05u+%2u ", start, count);
-	while (p++ != block_start)
-		printf("---");
-	printf(" ▼\n");
-
-	p = start;
-	printf("LSTREAM       ");
-	while (p++ != stopp)
-		printf("%2d ", lstream[p] < 100 ? lstream[p] : 99);
-	printf("\n");
-
-	p = start;
-	printf("HSTREAM       ");
-	while (p++ != stopp)
-		printf("%2d ", hstream[p] < 100 ? hstream[p] : 99);
-	printf("\n");
-	printf("\n");
+// forward stream to position
+static uint16_t forward(uint16_t start, uint16_t positions) {
+	for (int i = 0; i < positions; i++)
+		start++;
+	return start;
 }
 
-static void dump_topx() {
-	for (int t = 0; t < PULSE_TOP_X; t++)
-		printf("TOP%d     L %03d:%02d H %03d:%02d\n", t + 1, ltop_pulse[t], ltop_count[t], htop_pulse[t], htop_count[t]);
+// counts the distance between the two stream positions
+static uint16_t distance(uint16_t start, uint16_t end) {
+	uint16_t distance = 0;
+	while (start++ != end)
+		distance++;
+	return distance;
+}
+
+static void dump(uint8_t *stream, uint16_t start, uint16_t stopp, uint16_t marker) {
+	// noise marker
+	uint16_t n = stream == lstream ? lstream[marker] : hstream[marker];
+
+	// the opposite stream
+	uint8_t *xstream = stream == lstream ? hstream : lstream;
+
+	printf("DUMP %05u+%2u marker=%05u N=noise L=low H=high\n", start, distance(start, stopp), marker);
+
+	uint16_t p = start;
+	printf("N ");
+	while (p++ != stopp)
+
+		if (p == marker)
+			printf("  ▼");
+		else
+			printf("   ", stream[p] - n > 0 ? stream[p] - n : n - stream[p]);
+	printf("\n");
+
+	p = start;
+	printf("%s ", stream == lstream ? "L" : "H");
+	while (p++ != stopp)
+		printf("%3d", stream[p]);
+	printf("\n");
+
+	p = start;
+	printf("%s ", xstream == lstream ? "L" : "H");
+	while (p++ != stopp)
+		printf("%3d", xstream[p]);
 	printf("\n");
 }
 
@@ -86,7 +91,7 @@ static void dump_topx() {
 //
 // this may require a dummy bit at end of transmission
 //
-static uint64_t stream_probe_low(uint16_t pos, uint8_t bits, uint16_t divider) {
+static uint64_t probe_low(uint16_t pos, uint8_t bits, uint16_t divider) {
 	uint64_t code = 0;
 	uint8_t l, h;
 	for (int i = 0; i < bits; i++) {
@@ -110,7 +115,7 @@ static uint64_t stream_probe_low(uint16_t pos, uint8_t bits, uint16_t divider) {
 //     _           ___
 //   _| |___     _|   |_
 //      0             1
-static uint64_t stream_probe_high(uint16_t pos, uint8_t bits, uint16_t divider) {
+static uint64_t probe_high(uint16_t pos, uint8_t bits, uint16_t divider) {
 	uint64_t code = 0;
 	uint8_t l, h;
 	for (int i = 0; i < bits; i++) {
@@ -129,123 +134,80 @@ static uint64_t stream_probe_high(uint16_t pos, uint8_t bits, uint16_t divider) 
 	return code;
 }
 
-// rewind stream_write position
-static uint16_t stream_rewind(uint16_t start, uint16_t positions) {
-	for (int i = 0; i < positions; i++)
-		start--;
-	return start;
-}
+static void probe(uint16_t start, uint16_t stopp) {
+	if (rfcfg->verbose) {
+		printf("DECODER probing [%05u:%05u] %u samples\n", start, stopp, distance(start, stopp));
+		dump(lstream, start - 16, start + 32, start);
+		dump(lstream, stopp - 32, stopp + 16, stopp);
+	}
 
-// forward stream to position
-static uint16_t stream_forward(uint16_t start, uint16_t positions) {
-	for (int i = 0; i < positions; i++)
-		start++;
-	return start;
-}
-
-// counts the distance between the two stream positions
-static uint16_t stream_distance(uint16_t start, uint16_t end) {
-	uint16_t distance = 0;
-	while (start++ != end)
-		distance++;
-	return distance;
-}
-
-static void stream_probe(uint8_t *stream, uint16_t start, uint16_t stopp) {
-	if (rfcfg->verbose)
-		printf("DECODER probe [%05u:%05u] %u samples\n", start, stopp, stream_distance(start, stopp));
-
-	uint16_t count = (stopp > start) ? stopp - start : 0xffff - start + stopp;
-	if (count < 16)
-		return; // noise
-
-//	if (stream == lstream)
-//		printf("L-");
-//	else
-//		printf("H-");
-//	stream_dump(start, stopp);
-
-	uint64_t l = stream_probe_low(stopp - 64, 64, 15);
-	uint64_t h = stream_probe_high(stopp - 64, 64, 6);
+	uint64_t l = probe_low(stopp - 64, 64, 15);
+	uint64_t h = probe_high(stopp - 64, 64, 6);
 	printf("probe_low 0x%016llx == %s probe_high 0x%016llx == %s\n", l, printbits64(l, SPACEMASK64), h, printbits64(h, SPACEMASK64));
+
+	printf("\n");
 }
 
-static uint16_t stream_start_sequence(uint8_t *stream, uint16_t start, uint16_t stopp, uint8_t top1, uint8_t top2, uint8_t top3) {
-	int match = 0;
-	while (start != stopp) {
-		uint8_t pulse = stream[start++];
-		if (pulse == top1 || pulse == top2 || pulse == top3)
-			match++;
-		else
-			match = 0;
+static int pattern(uint8_t *stream, uint16_t start) {
+	// fill pattern window
+	uint8_t p0 = stream[start], p1 = stream[start + 1], p2 = stream[start + 2], p3 = stream[start + 3];
 
-		if (match == 3)
-			return start - 3; // 3 matches in sequence
-	}
+	// contains zeros
+	if (p0 == 0 || p1 == 0 || p2 == 0 || p3 == 0)
+		return 0;
+
+	// [3 3 3 3] detect identical values with tolerance
+	if (p0 == p1 && p1 == p2 && p2 == p3)
+		return 1;
+
+	// [9 9 19 19] [9 19 19 9] symmetric identical values
+	if (p0 == p1 && p2 == p3)
+		return 1;
+	if (p0 == p3 && p1 == p2)
+		return 1;
+
+	// [5 10 5 10] alternating identical values
+	if (p0 == p2 && p1 == p3)
+		return 1;
+
+	// [19 19 19 9] 3 identical values
+	if (p0 == p1 && p1 == p2)
+		return 1;
+	if (p0 == p1 && p1 == p3)
+		return 1;
+	if (p0 == p2 && p2 == p3)
+		return 1;
+	if (p1 == p2 && p2 == p3)
+		return 1;
+
+	// [6  5  7  6] square sum max +- 1
+	int q = (p0 + p1 + p2 + p3) / 4;
+	int qmin = q - 1, qmax = q + 1;
+	int tolerate = p0 == q || p0 == qmin || p0 == qmax;
+	tolerate &= p1 == q || p1 == qmin || p1 == qmax;
+	tolerate &= p2 == q || p2 == qmin || p2 == qmax;
+	tolerate &= p3 == q || p3 == qmin || p3 == qmax;
+	if (tolerate)
+		return 1;
+
+	// [5 10 5 15] multiples of smallest
+	uint8_t min = p0;
+	if (p1 < min)
+		min = p1;
+	if (p2 < min)
+		min = p2;
+	if (p3 < min)
+		min = p3;
+	int modulos = (p0 % min) + (p1 % min) + (p2 % min) + (p3 % min);
+	if (min > 2 && !modulos)
+		return 1;
+
 	return 0;
-}
-
-static uint16_t stream_stopp_sequence(uint8_t *stream, uint16_t start, uint16_t stopp, uint8_t top1, uint8_t top2, uint8_t top3) {
-	int mismatch = 0;
-	while (start != stopp) {
-		uint8_t pulse = stream[start++];
-		if (pulse == top1 || pulse == top2 || pulse == top3)
-			mismatch = 0;
-		else
-			mismatch++;
-
-		if (mismatch == 3)
-			return start - 3; // 3 mismatches in sequence
-	}
-	return 0;
-}
-
-static void stream_count_pulses(uint16_t start, uint16_t stopp) {
-	uint16_t l, h, lmaxc, hmaxc, lmaxp, hmaxp;
-
-	// clear pulse counters
-	memset(lpulse_counter, 0, sizeof(lpulse_counter));
-	memset(hpulse_counter, 0, sizeof(hpulse_counter));
-
-	// count pulses - pulse length / 100 is the array index
-	for (uint16_t i = start; i < stopp; i++) {
-		l = lstream[i];
-		h = hstream[i];
-		if (l == 0 || h == 0)
-			continue;
-		lpulse_counter[l]++;
-		hpulse_counter[h]++;
-	}
-
-	// now find the top-x pulses
-	for (int t = 0; t < PULSE_TOP_X; t++) {
-		hmaxc = lmaxc = hmaxp = lmaxp = 0;
-		for (int i = 0; i < BUFFER; i++) {
-			if (lpulse_counter[i] > lmaxc) {
-				lmaxc = lpulse_counter[i];
-				lmaxp = i;
-			}
-			if (hpulse_counter[i] > hmaxc) {
-				hmaxc = hpulse_counter[i];
-				hmaxp = i;
-			}
-		}
-		ltop_count[t] = lmaxc;
-		ltop_pulse[t] = lmaxp;
-		htop_count[t] = hmaxc;
-		htop_pulse[t] = hmaxp;
-		lpulse_counter[lmaxp] = 0; // not detect again
-		hpulse_counter[hmaxp] = 0; // not detect again
-	}
-
-	// write back top-x pulse counters
-	for (int t = 0; t < PULSE_TOP_X; t++) {
-		lpulse_counter[ltop_pulse[t]] = ltop_count[t];
-		hpulse_counter[htop_pulse[t]] = htop_count[t];
-	}
 }
 
 void* stream_decoder(void *arg) {
+	uint16_t start, stopp, streampointer_last = 0;
+
 	if (pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL)) {
 		perror("Error setting pthread_setcancelstate");
 		return (void*) 0;
@@ -255,22 +217,20 @@ void* stream_decoder(void *arg) {
 		printf("DECODER run every %d ms, noise level %d µs, %s\n", rfcfg->decoder_delay, rfcfg->noise,
 				rfcfg->collect_identical_codes ? "collect identical codes" : "process each code separately");
 
-	uint16_t start, stopp, count, i, streampointer_last = 0;
-	uint8_t l, h;
-
 	while (1) {
 		msleep(rfcfg->decoder_delay);
 
 		// if we see ~8 pulses between 200-5000µs we assume receiving is in progress, so wait another 100ms
 		while (1) {
-			start = stream_rewind(streampointer, 8);
+			start = backward(streampointer, 8);
+
 			int valid = 0;
-			for (i = 0; i < 8; i++) {
-				l = lstream[start];
+			for (int i = 0; i < 8; i++) {
+				uint8_t l = lstream[start];
 				if (2 < l && l < 50)
 					valid++;
 
-				h = hstream[start];
+				uint8_t h = hstream[start];
 				if (2 < h && h < 50)
 					valid++;
 			}
@@ -291,47 +251,51 @@ void* stream_decoder(void *arg) {
 		stopp = streampointer;
 
 		if (rfcfg->verbose)
-			printf("DECODER analyzing [%05u:%05u] %u samples\n", start, stopp, stream_distance(start, stopp));
+			printf("DECODER analyzing [%05u:%05u] %u samples\n", start, stopp, distance(start, stopp));
 
 		while (1) {
-			count = stream_distance(start, stopp);
 
 			// not enough samples available -> next round
-			if (count < BLOCKSIZE)
+			int count = distance(start, stopp);
+			if (count < 16)
 				break;
 
-			uint16_t block = stream_forward(start, BLOCKSIZE);
-			stream_count_pulses(start, block);
+			// find code start pattern
+			while (++start != stopp)
+				if (pattern(hstream, start))
+					break;
 
-			if ((ltop_count[0] + ltop_count[1] + ltop_count[2]) < BLOCKSIZE / 2) {
-				// we found only noise -> forward half blocksize and analyze next block
-				start = stream_forward(start, BLOCKSIZE / 2);
+			if (start == stopp)
+				break; // nothing
+
+			uint16_t cstart = start;
+			printf("DECODER start pattern [%d, %d, %d, %d] at %05u\n", hstream[cstart], hstream[cstart + 1], hstream[cstart + 2], hstream[cstart + 3], cstart);
+
+			// find code stopp pattern
+			while (++start != stopp)
+				if (!pattern(hstream, start))
+					break;
+
+			if (start == stopp)
+				break; // nothing
+
+			uint16_t cstopp = start + 3;
+			printf("DECODER stopp pattern [%d, %d, %d, %d] at %05u\n", hstream[cstopp - 3], hstream[cstopp - 2], hstream[cstopp - 1], hstream[cstopp], cstopp);
+
+			// validate code window
+			int dist = distance(cstart, cstopp);
+			if (dist < 16) {
+				for (int i = 0; i < 5; i++)
+					if (start != stopp)
+						start++;
+				if (rfcfg->verbose)
+					printf("DECODER code start/stopp distance too small [%05d:%05d] %d, forward to %05d\n", cstart, cstopp, dist, start);
 				continue;
 			}
 
-			// find the block with all top-3 pulses
-			uint16_t block_start = 0, block_stopp = 0;
-			block_start = stream_start_sequence(lstream, start, stopp, ltop_pulse[0], ltop_pulse[1], ltop_pulse[2]);
-			block_stopp = stream_stopp_sequence(lstream, block_start, stopp, ltop_pulse[0], ltop_pulse[1], ltop_pulse[2]);
-
-			if (rfcfg->verbose) {
-				dump_stream(start, block, block_start);
-				dump_pulse_counter();
-				dump_topx();
-			}
-
-			// validate block window
-			if (block_start == 0 || block_stopp == 0) {
-				if (rfcfg->verbose)
-					printf("DECODER stream start/stopp sequence error: start=%05u stopp=%05u\n", block_start, block_stopp);
-				start = block;
-				break;
-			}
-
-			// analyze this block + forward stream to find next
-			stream_probe(lstream, block_start, block_stopp);
-			start = block_stopp;
-			continue;
+			// analyze this code and forward stream to find next code
+			probe(cstart, cstopp);
+			start = cstopp;
 		}
 
 		// next round
