@@ -53,31 +53,31 @@ static uint16_t distance(uint16_t start, uint16_t end) {
 	return distance;
 }
 
-static void dump(uint8_t *stream, uint16_t start, uint16_t stopp, int mstart, int mstopp) {
+static void dump(uint8_t *stream, uint16_t start, uint16_t stop, int mstart, int mstop) {
 	uint16_t p;
 
 	// the opposite stream
 	uint8_t *xstream = stream == lstream ? hstream : lstream;
-	printf("DUMP %05u+%2u marker=%05u N=noise L=low H=high\n", start, distance(start, stopp), mstart > 0 ? mstart : mstopp);
+	printf("DUMP %05u+%2u marker=%05u N=noise L=low H=high\n", start, distance(start, stop), mstart > 0 ? mstart : mstop);
 
 	p = start;
 	printf("%s ", stream == lstream ? "L" : "H");
 	if (mstart == -1)
 		green();
-	while (p++ != stopp) {
+	while (p++ != stop) {
 		if (p == mstart)
 			green();
 		printf("%3d", stream[p]);
-		if (p == mstopp)
+		if (p == mstop)
 			attroff();
 	}
-	if (mstopp == -1)
+	if (mstop == -1)
 		attroff();
 	printf("\n");
 
 	p = start;
 	printf("%s ", xstream == lstream ? "L" : "H");
-	while (p++ != stopp) {
+	while (p++ != stop) {
 		printf("%3d", xstream[p]);
 	}
 	printf("\n");
@@ -142,7 +142,7 @@ static uint64_t probe_high(uint16_t pos, uint8_t bits, uint16_t divider) {
 	return code;
 }
 
-static void probe(uint16_t start, uint16_t stopp) {
+static void probe(uint16_t start, uint16_t stop) {
 	// select the stream to sample on
 	uint8_t *stream;
 	if (rfcfg->sample_on_0)
@@ -151,18 +151,17 @@ static void probe(uint16_t start, uint16_t stopp) {
 		stream = hstream;
 
 	if (rfcfg->verbose) {
-		printf("\n");
-		printf("DECODER probing [%05u:%05u] %u samples,", start, stopp, distance(start, stopp));
+		printf("DECODER probing [%05u:%05u] %u samples,", start, stop, distance(start, stop));
 		printf(" start pattern [%d, %d, %d, %d],", stream[start], stream[start + 1], stream[start + 2], stream[start + 3]);
-		printf(" stopp pattern [%d, %d, %d, %d]\n", stream[stopp - 3], stream[stopp - 2], stream[stopp - 1], stream[stopp]);
+		printf(" stop  pattern [%d, %d, %d, %d]\n", stream[stop - 3], stream[stop - 2], stream[stop - 1], stream[stop]);
 		dump(stream, start - 16, start + 32, start, -1);
-		dump(stream, stopp - 32, stopp + 16, -1, stopp);
-		printf("\n");
+		dump(stream, stop - 32, stop + 16, -1, stop);
 	}
 
-	uint64_t l = probe_low(stopp - 64, 64, 15);
-	uint64_t h = probe_high(stopp - 64, 64, 6);
-	printf("probe_low 0x%016llx == %s probe_high 0x%016llx == %s\n", l, printbits64(l, SPACEMASK64), h, printbits64(h, SPACEMASK64));
+	uint64_t l = probe_low(stop - 64, 64, 15);
+	uint64_t h = probe_high(stop - 64, 64, 6);
+	if (rfcfg->verbose)
+		printf("DECODER probe_low 0x%016llx == %s probe_high 0x%016llx == %s\n", l, printbits64(l, SPACEMASK64), h, printbits64(h, SPACEMASK64));
 }
 
 // dumb 4-block symbol pattern matching
@@ -220,6 +219,34 @@ static int match8(uint8_t *stream, uint16_t start, int allowed) {
 	return 0;
 }
 
+// check the last received pulses - if between 200-5000µs we assume receiving is in progress
+static int receiving() {
+	uint16_t ptr = backward(streampointer, 10);
+
+	int valid = 0;
+	for (int i = 0; i < 8; i++) {
+		uint8_t l = lstream[ptr];
+		uint8_t h = hstream[ptr];
+
+		if (2 < l && l < 50)
+			valid++;
+
+		if (2 < h && h < 50)
+			valid++;
+
+		ptr++;
+	}
+
+	// not enough valid pulses - start decoding
+	if (valid < 12)
+		return 0;
+
+	if (rfcfg->verbose)
+		printf("DECODER receiving\n");
+
+	return 1;
+}
+
 void* stream_decoder(void *arg) {
 	if (pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL)) {
 		perror("Error setting pthread_setcancelstate");
@@ -231,61 +258,38 @@ void* stream_decoder(void *arg) {
 				rfcfg->collect_identical_codes ? "collect identical codes" : "process each code separately");
 
 	// select the stream to sample on
-	uint8_t *stream, l, h;
+	uint8_t *stream;
 	if (rfcfg->sample_on_0)
 		stream = lstream;
 	else
 		stream = hstream;
 
-	// block pointer and validation pointer
-	uint16_t bptr = 0, vptr = 0;
-
 	// decoder main loop: pause, then decode block
+	uint16_t ptr = 0;
 	while (1) {
 		msleep(rfcfg->decoder_delay);
 
-		// if we see ~8 pulses between 200-5000µs we assume receiving is in progress, so wait another 100ms
-		while (1) {
-			vptr = backward(streampointer, 8);
-
-			int valid = 0;
-			for (int i = 0; i < 8; i++) {
-				l = lstream[vptr++];
-				if (2 < l && l < 50)
-					valid++;
-
-				h = hstream[vptr++];
-				if (2 < h && h < 50)
-					valid++;
-			}
-
-			// if we see valid pulses - wait and check again
-			if (valid > 10) {
-				if (rfcfg->verbose)
-					printf("DECODER receiving\n");
-				msleep(100);
-			} else {
-				break; // start decoding
-			}
-		}
+		// wait if receiving in progress
+		while (receiving())
+			msleep(100);
 
 		// this is the block we have to analyze in this round
-		uint16_t block = distance(bptr, streampointer);
+		uint16_t block = distance(ptr, streampointer);
 		if (rfcfg->verbose)
-			printf("DECODER analyzing [%05u:%05u] %u samples\n", bptr, streampointer, block);
+			printf("DECODER analyzing [%05u:%05u] %u samples\n", ptr, streampointer, block);
 
-		// block loop: do not overtake streampointer: start +4 and stopp +4
+		// block loop: do not overtake streampointer: start +4 and stop +4
 		while (block > 8) {
 
 			// find code start pattern by 4-block jumps
-			if (!match4(stream, bptr)) {
-				bptr = forward(bptr, 4);
+			if (!match4(stream, ptr)) {
+				ptr = forward(ptr, 4);
 				block -= 4;
 				continue;
 			}
 
 			// adjust left edge of code window
-			uint16_t cstart = bptr;
+			uint16_t cstart = ptr;
 			if (match4(stream, cstart - 1))
 				cstart--;
 			if (match4(stream, cstart - 1))
@@ -293,30 +297,30 @@ void* stream_decoder(void *arg) {
 			if (match4(stream, cstart - 1))
 				cstart--;
 
-			// find code stopp pattern
-			while (block > 4 && match4(stream, bptr)) {
-				bptr = forward(bptr, 4);
+			// find code stop pattern
+			while (block > 4 && match4(stream, ptr)) {
+				ptr = forward(ptr, 4);
 				block -= 4;
 			}
 
 			// adjust right edge of code window
-			uint16_t cstopp = bptr;
-			if (!match4(stream, cstopp - 1))
-				cstopp--;
-			if (!match4(stream, cstopp - 1))
-				cstopp--;
-			if (!match4(stream, cstopp - 1))
-				cstopp--;
+			uint16_t cstop = ptr;
+			if (!match4(stream, cstop - 1))
+				cstop--;
+			if (!match4(stream, cstop - 1))
+				cstop--;
+			if (!match4(stream, cstop - 1))
+				cstop--;
 
-			// now this is the last matching position
-			cstopp += 3;
+			// right edge of last matching position
+			cstop += 3;
 
 			// validate and analyze code
-			if (distance(cstart, cstopp) > 16)
-				probe(cstart, cstopp); // right edge
+			if (distance(cstart, cstop) > 16)
+				probe(cstart, cstop);
 
-			// this is the next position we have to match
-			bptr = cstopp + 1;
+			// this is the next position we have to test
+			ptr = cstop + 1;
 		}
 	}
 	return (void*) 0;
