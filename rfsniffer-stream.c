@@ -44,12 +44,8 @@ static uint16_t distance(uint16_t start, uint16_t end) {
 }
 
 static void dump(uint8_t *stream, uint16_t start, uint16_t stopp, uint16_t marker) {
-	// noise marker
-	uint16_t n = stream == lstream ? lstream[marker] : hstream[marker];
-
 	// the opposite stream
 	uint8_t *xstream = stream == lstream ? hstream : lstream;
-
 	printf("DUMP %05u+%2u marker=%05u N=noise L=low H=high\n", start, distance(start, stopp), marker);
 
 	uint16_t p = start;
@@ -59,7 +55,7 @@ static void dump(uint8_t *stream, uint16_t start, uint16_t stopp, uint16_t marke
 		if (p == marker)
 			printf("  ▼");
 		else
-			printf("   ", stream[p] - n > 0 ? stream[p] - n : n - stream[p]);
+			printf("   ");
 	printf("\n");
 
 	p = start;
@@ -136,7 +132,10 @@ static uint64_t probe_high(uint16_t pos, uint8_t bits, uint16_t divider) {
 
 static void probe(uint16_t start, uint16_t stopp) {
 	if (rfcfg->verbose) {
-		printf("DECODER probing [%05u:%05u] %u samples\n", start, stopp, distance(start, stopp));
+		printf("DECODER probing [%05u:%05u] %u samples,", start, stopp, distance(start, stopp));
+		printf(" start pattern [%d, %d, %d, %d],", hstream[start], hstream[start + 1], hstream[start + 2], hstream[start + 3]);
+		printf(" stopp pattern [%d, %d, %d, %d]\n", hstream[stopp - 3], hstream[stopp - 2], hstream[stopp - 1], hstream[stopp]);
+
 		dump(lstream, start - 16, start + 32, start);
 		dump(lstream, stopp - 32, stopp + 16, stopp);
 	}
@@ -148,15 +147,15 @@ static void probe(uint16_t start, uint16_t stopp) {
 	printf("\n");
 }
 
-static int pattern(uint8_t *stream, uint16_t start) {
-	// fill pattern window
+// dumb 4-block symbol pattern matching
+static int block4(uint8_t *stream, uint16_t start) {
 	uint8_t p0 = stream[start], p1 = stream[start + 1], p2 = stream[start + 2], p3 = stream[start + 3];
 
 	// contains zeros
 	if (p0 == 0 || p1 == 0 || p2 == 0 || p3 == 0)
 		return 0;
 
-	// [3 3 3 3] detect identical values with tolerance
+	// [3 3 3 3] full identical
 	if (p0 == p1 && p1 == p2 && p2 == p3)
 		return 1;
 
@@ -190,18 +189,12 @@ static int pattern(uint8_t *stream, uint16_t start) {
 	if (tolerate)
 		return 1;
 
-	// [5 10 5 15] multiples of smallest
-	uint8_t min = p0;
-	if (p1 < min)
-		min = p1;
-	if (p2 < min)
-		min = p2;
-	if (p3 < min)
-		min = p3;
-	int modulos = (p0 % min) + (p1 % min) + (p2 % min) + (p3 % min);
-	if (min > 2 && !modulos)
-		return 1;
+	return 0;
+}
 
+// determine symbols and count them
+static int block8(uint8_t *stream, uint16_t start, int allowed) {
+	// parameter entscheidet wieviel unterschiedliche symbole erlaubt sind
 	return 0;
 }
 
@@ -253,49 +246,47 @@ void* stream_decoder(void *arg) {
 		if (rfcfg->verbose)
 			printf("DECODER analyzing [%05u:%05u] %u samples\n", start, stopp, distance(start, stopp));
 
-		while (1) {
+		int dist = distance(start, stopp);
 
-			// not enough samples available -> next round
-			int count = distance(start, stopp);
-			if (count < 16)
-				break;
+		// decoder main loop
+		while (dist > 8) {
 
-			// find code start pattern
-			while (++start != stopp)
-				if (pattern(hstream, start))
-					break;
-
-			if (start == stopp)
-				break; // nothing
-
-			uint16_t cstart = start;
-			printf("DECODER start pattern [%d, %d, %d, %d] at %05u\n", hstream[cstart], hstream[cstart + 1], hstream[cstart + 2], hstream[cstart + 3], cstart);
-
-			// find code stopp pattern
-			while (++start != stopp)
-				if (!pattern(hstream, start))
-					break;
-
-			if (start == stopp)
-				break; // nothing
-
-			uint16_t cstopp = start + 3;
-			printf("DECODER stopp pattern [%d, %d, %d, %d] at %05u\n", hstream[cstopp - 3], hstream[cstopp - 2], hstream[cstopp - 1], hstream[cstopp], cstopp);
-
-			// validate code window
-			int dist = distance(cstart, cstopp);
-			if (dist < 16) {
-				for (int i = 0; i < 5; i++)
-					if (start != stopp)
-						start++;
-				if (rfcfg->verbose)
-					printf("DECODER code start/stopp distance too small [%05d:%05d] %d, forward to %05d\n", cstart, cstopp, dist, start);
+			// find code start pattern by 4-block jumps
+			while (!block4(hstream, start)) {
+				start = forward(start, 4);
+				dist -= 4;
 				continue;
 			}
 
+			// adjust left end to find first match
+			while (block4(hstream, start - 1)) {
+				start--;
+				dist++;
+			}
+
+			uint16_t cstart = start;
+
+			// find code stopp pattern by 4-block jumps
+			while (block4(hstream, start)) {
+				start = forward(start, 4);
+				dist -= 4;
+			}
+
+			// adjust right end to find last match
+			while (!block4(hstream, start - 1)) {
+				start--;
+				dist++;
+			}
+
+			uint16_t cstopp = start;
+
 			// analyze this code and forward stream to find next code
-			probe(cstart, cstopp);
+			int cdist = distance(cstart, cstopp + 3); // right edge of 4-block
+			if (cdist >= 16)
+				probe(cstart, cstopp);
+
 			start = cstopp;
+			dist -= cdist;
 		}
 
 		// next round
@@ -339,6 +330,8 @@ void* stream_sampler(void *arg) {
 	matrix_init();
 
 	streampointer = 0;
+
+	// sampler main loop
 	while (1) {
 		// wait for interrupt
 		poll(fdset, 1, -1);
