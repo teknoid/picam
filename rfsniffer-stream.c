@@ -207,6 +207,10 @@ static int match4(uint8_t *stream, uint16_t start) {
 	if (tolerate)
 		return 1;
 
+	// TODO
+	// [5, 10, 5, 15] 3 symbols
+	// [19, 9, 19, 10] symbol tolerance
+
 	return 0;
 }
 
@@ -217,8 +221,6 @@ static int match8(uint8_t *stream, uint16_t start, int allowed) {
 }
 
 void* stream_decoder(void *arg) {
-	uint16_t start, stopp, dist, streampointer_last = 0;
-
 	if (pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL)) {
 		perror("Error setting pthread_setcancelstate");
 		return (void*) 0;
@@ -229,11 +231,14 @@ void* stream_decoder(void *arg) {
 				rfcfg->collect_identical_codes ? "collect identical codes" : "process each code separately");
 
 	// select the stream to sample on
-	uint8_t *stream;
+	uint8_t *stream, l, h;
 	if (rfcfg->sample_on_0)
 		stream = lstream;
 	else
 		stream = hstream;
+
+	// block pointer and validation pointer
+	uint16_t bptr = 0, vptr = 0;
 
 	// decoder main loop: pause, then decode block
 	while (1) {
@@ -241,83 +246,78 @@ void* stream_decoder(void *arg) {
 
 		// if we see ~8 pulses between 200-5000µs we assume receiving is in progress, so wait another 100ms
 		while (1) {
-			start = backward(streampointer, 8);
+			vptr = backward(streampointer, 8);
 
 			int valid = 0;
 			for (int i = 0; i < 8; i++) {
-				uint8_t l = lstream[start];
+				l = lstream[vptr++];
 				if (2 < l && l < 50)
 					valid++;
 
-				uint8_t h = hstream[start];
+				h = hstream[vptr++];
 				if (2 < h && h < 50)
 					valid++;
 			}
 
-			// start decoding
-			if (valid < 10)
-				break;
-
-			if (rfcfg->verbose)
-				printf("DECODER receiving\n");
-
-			// wait and check again
-			msleep(100);
+			// if we see valid pulses - wait and check again
+			if (valid > 10) {
+				if (rfcfg->verbose)
+					printf("DECODER receiving\n");
+				msleep(100);
+			} else {
+				break; // start decoding
+			}
 		}
 
 		// this is the block we have to analyze in this round
-		start = streampointer_last;
-		stopp = streampointer;
-		dist = distance(start, stopp);
-
+		uint16_t block = distance(bptr, streampointer);
 		if (rfcfg->verbose)
-			printf("DECODER analyzing [%05u:%05u] %u samples\n", start, stopp, dist);
+			printf("DECODER analyzing [%05u:%05u] %u samples\n", bptr, streampointer, block);
 
-		// block loop
-		while (dist > 8) {
+		// block loop: do not overtake streampointer: start +4 and stopp +4
+		while (block > 8) {
 
 			// find code start pattern by 4-block jumps
-			while (!match4(stream, start)) {
-				start = forward(start, 4);
-				dist -= 4;
+			if (!match4(stream, bptr)) {
+				bptr = forward(bptr, 4);
+				block -= 4;
 				continue;
 			}
 
-			// adjust left edge to find first match
-			while (match4(stream, start - 1)) {
-				start--;
-				dist++;
+			// adjust left edge of code window
+			uint16_t cstart = bptr;
+			if (match4(stream, cstart - 1))
+				cstart--;
+			if (match4(stream, cstart - 1))
+				cstart--;
+			if (match4(stream, cstart - 1))
+				cstart--;
+
+			// find code stopp pattern
+			while (block > 4 && match4(stream, bptr)) {
+				bptr = forward(bptr, 4);
+				block -= 4;
 			}
 
-			// left edge of first match is code start window
-			uint16_t cstart = start;
+			// adjust right edge of code window
+			uint16_t cstopp = bptr;
+			if (!match4(stream, cstopp - 1))
+				cstopp--;
+			if (!match4(stream, cstopp - 1))
+				cstopp--;
+			if (!match4(stream, cstopp - 1))
+				cstopp--;
 
-			// find code stopp pattern by 4-block jumps
-			while (match4(stream, start)) {
-				start = forward(start, 4);
-				dist -= 4;
-			}
+			// now this is the last matching position
+			cstopp += 3;
 
-			// adjust right edge to find first mismatch
-			while (!match4(stream, start - 1)) {
-				start--;
-				dist++;
-			}
+			// validate and analyze code
+			if (distance(cstart, cstopp) > 16)
+				probe(cstart, cstopp); // right edge
 
-			// right edge of last match is code end window
-			uint16_t cstopp = start + 3;
-
-			// analyze code, then skip code window and continue
-			int cdist = distance(cstart, cstopp);
-			if (cdist >= 16)
-				probe(cstart, cstopp);
-
-			start = cstopp;
-			dist -= cdist;
+			// this is the next position we have to match
+			bptr = cstopp + 1;
 		}
-
-		// next block round
-		streampointer_last = stopp;
 	}
 	return (void*) 0;
 }
