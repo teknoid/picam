@@ -19,9 +19,9 @@
 static uint8_t *stream, lstream[0xffff], hstream[0xffff];
 static uint16_t streampointer;
 
-// valid symbol table and count
-uint16_t lcounter[SYMBOLS], hcounter[SYMBOLS];
-uint8_t lsymbols[SYMBOLS], hsymbols[SYMBOLS];
+// tables for symbol and count
+uint16_t *counter, lcounter[SYMBOLS], hcounter[SYMBOLS], mcounter[SYMBOLS];
+uint8_t *symbols, lsymbols[SYMBOLS], hsymbols[SYMBOLS], msymbols[SYMBOLS];
 
 extern rfsniffer_config_t *rfcfg;
 
@@ -43,11 +43,15 @@ static void clearline() {
 // select the LOW stream
 static void select_lstream() {
 	stream = lstream;
+	counter = lcounter;
+	symbols = lsymbols;
 }
 
 // select the HIGH stream
 static void select_hstream() {
 	stream = hstream;
+	counter = hcounter;
+	symbols = hsymbols;
 }
 
 // rewind stream to position
@@ -181,12 +185,6 @@ static uint64_t probe_high(uint16_t pos, uint8_t bits, uint16_t divider) {
 
 // returns the symbol matching given distance, otherwise return -1
 static int symbol_match_dist(uint8_t s, int d) {
-	uint8_t *symbols;
-	if (stream == lstream)
-		symbols = lsymbols;
-	else
-		symbols = hsymbols;
-
 	for (int i = 0; i < SYMBOLS; i++) {
 		int m = symbols[i];
 		if (!m)
@@ -197,36 +195,36 @@ static int symbol_match_dist(uint8_t s, int d) {
 	return -1; // not matching symbol for distance found
 }
 
-// returns 1 if symbol ..., otherwise 0
+// returns 1 if symbol matches both tables with max +- 1 distance, otherwise 0
 static int symbol_match_edge(uint16_t pos) {
 	uint8_t s, l = lstream[pos], h = hstream[pos];
-	int lmatch = 0, hmatch = 0;
 
+	int lvalid = 0, lmatch = 0;
 	for (int i = 0; i < SYMBOLS; i++) {
 		s = lsymbols[i];
 		if (!s)
 			break; // table end
+		lvalid |= l == s;
 		lmatch |= l == s || l == (s - 1) || l == (s + 1);
 	}
 
+	int hvalid = 0, hmatch = 0;
 	for (int i = 0; i < SYMBOLS; i++) {
 		s = hsymbols[i];
 		if (!s)
 			break; // table end
+		hvalid |= h == s;
 		hmatch |= h == s || h == (s - 1) || h == (s + 1);
 	}
 
-	return lmatch && hmatch;
+	if (hvalid || lvalid)
+		return 1; // exact one of them
+	else
+		return hmatch && lmatch; // both with tolerance
 }
 
 // returns the symbol matching distance max +- 1, otherwise return -1
 static int symbol_match(uint8_t s) {
-	uint8_t *symbols;
-	if (stream == lstream)
-		symbols = lsymbols;
-	else
-		symbols = hsymbols;
-
 	for (int i = 0; i < SYMBOLS; i++) {
 		uint8_t m = symbols[i];
 		if (!m)
@@ -243,13 +241,6 @@ static int symbol_match(uint8_t s) {
 
 // returns 1 if symbol is exact valid, otherwise 0
 static int symbol_valid(uint8_t s) {
-	uint8_t *symbols;
-
-	if (stream == lstream)
-		symbols = lsymbols;
-	else
-		symbols = hsymbols;
-
 	for (int i = 0; i < SYMBOLS; i++) {
 		uint8_t v = symbols[i];
 		if (!v)
@@ -262,16 +253,6 @@ static int symbol_valid(uint8_t s) {
 
 // returns the occurrence count of a symbol
 static int symbol_count(uint8_t s) {
-	uint16_t *counter;
-	uint8_t *symbols;
-	if (stream == lstream) {
-		symbols = lsymbols;
-		counter = lcounter;
-	} else {
-		symbols = hsymbols;
-		counter = hcounter;
-	}
-
 	for (int i = 0; i < SYMBOLS; i++)
 		if (s == symbols[i])
 			return counter[i];
@@ -279,55 +260,80 @@ static int symbol_count(uint8_t s) {
 	return 0;
 }
 
+// merge both symbol and counter tables
+static void symbols_merge() {
+	memset(msymbols, 0, SYMBOLS * sizeof(uint8_t));
+	memset(mcounter, 0, SYMBOLS * sizeof(uint16_t));
+
+	// insert LOW symbols
+	for (int i = 0; i < SYMBOLS; i++) {
+		msymbols[i] = lsymbols[i];
+		mcounter[i] = lcounter[i];
+	}
+
+	// insert/update HIGH symbols
+	for (int x = 0; x < SYMBOLS; x++) {
+		int updated = 0;
+		for (int y = 0; y < SYMBOLS; y++) {
+			if (msymbols[y] == hsymbols[x]) {
+				mcounter[y] += hcounter[x];
+				updated = 1;
+			}
+		}
+		if (!updated) {
+			int y = 0; // next free entry
+			while (msymbols[y])
+				y++;
+			if (y > SYMBOLS)
+				break; // table full
+			msymbols[y] = hsymbols[x];
+			mcounter[y] = hcounter[x];
+		}
+	}
+
+	if (rfcfg->verbose) {
+		printf("DECODER merged symbol table ");
+		for (int i = 0; i < SYMBOLS; i++)
+			if (msymbols[i])
+				printf("%d:%d ", msymbols[i], mcounter[i]);
+		printf("\n");
+	}
+}
+
 // remove symbols below minimum occurrence
 static void symbols_clean(int min) {
 	if (rfcfg->verbose)
-		printf("DECODER clean symbols ");
+		printf("DECODER %s clean symbols ", stream == lstream ? "L" : "H");
 
-	// merge both symbol tables and counters
-	uint16_t counter[SYMBOLS];
-	uint8_t symbols[SYMBOLS];
-	memset(symbols, 0, SYMBOLS * sizeof(uint8_t));
-	memset(counter, 0, SYMBOLS * sizeof(uint16_t));
-	for (int i = 0; i < SYMBOLS; i++) {
-		if (lsymbols[i] && lcounter[i] < min) {
+	for (int x = 0; x < SYMBOLS; x++) {
+		uint8_t s = symbols[x];
+		if (!s)
+			break; // table end
+
+		uint16_t c = 0;
+		for (int y = 0; y < SYMBOLS; y++)
+			if (s == msymbols[y])
+				c = mcounter[y];
+
+		if (c <= min && s < msymbols[0]) {
 			if (rfcfg->verbose)
-				printf("L%d ", lsymbols[i]);
-			lsymbols[i] = 0;
-			lcounter[i] = 0;
-		}
-		if (hsymbols[i] && hcounter[i] < min) {
-			if (rfcfg->verbose)
-				printf("H%d ", hsymbols[i]);
-			hsymbols[i] = 0;
-			hcounter[i] = 0;
+				printf("L%d ", symbols[x]);
+			symbols[x] = 0;
+			counter[x] = 0;
 		}
 	}
+
 	if (rfcfg->verbose) {
-		printf("\nDECODER symbol table after clean   L = ");
+		printf("; table after clean contains ");
 		for (int i = 0; i < SYMBOLS; i++)
-			if (lsymbols[i])
-				printf("%d:%d ", lsymbols[i], lcounter[i]);
-		printf("   H = ");
-		for (int i = 0; i < SYMBOLS; i++)
-			if (hsymbols[i])
-				printf("%d:%d ", hsymbols[i], hcounter[i]);
+			if (symbols[i])
+				printf("%d:%d ", symbols[i], counter[i]);
 		printf("\n");
 	}
 }
 
 // collect valid symbols
 static void symbols_collect(uint16_t start, uint16_t stop) {
-	uint16_t *counter;
-	uint8_t *symbols;
-	if (stream == lstream) {
-		symbols = lsymbols;
-		counter = lcounter;
-	} else {
-		symbols = hsymbols;
-		counter = hcounter;
-	}
-
 	// clear symbols + count
 	memset(symbols, 0, SYMBOLS * sizeof(uint8_t));
 	memset(counter, 0, SYMBOLS * sizeof(uint16_t));
@@ -404,12 +410,12 @@ static void error_correction(uint16_t start, uint16_t stop) {
 		symbols_collect(start, stop);
 	}
 
-	// special error handling:
+	// hard errors:
 	// correct the symbol if it occurs very rare (<5%) and the distance to a valid symbol is max 5
 	uint16_t rare = distance(start, stop) / 20;
 
 	if (rfcfg->verbose)
-		printf("DECODER %s hard correction ", stream == lstream ? "L" : "H");
+		printf("DECODER %s hard correction rare=%d ", stream == lstream ? "L" : "H", rare);
 
 	p = start;
 	int fixed = 0;
@@ -434,7 +440,7 @@ static void error_correction(uint16_t start, uint16_t stop) {
 	if (rfcfg->verbose) {
 		printf("\n");
 		if (fixed || unfixed)
-			printf("DECODER %s %d fixed symbols, %d unfixed symbols\n", stream == lstream ? "L" : "H", fixed, unfixed);
+			printf("DECODER %s fixed %d, unfixed %d symbols\n", stream == lstream ? "L" : "H", fixed, unfixed);
 		else
 			clearline();
 	}
@@ -457,8 +463,99 @@ static int errors_in_block(uint16_t start, uint16_t stop, int d) {
 	return errors;
 }
 
+// left code window expansion - difficult because the signal slowly goes into noise on this side
+static uint16_t expand_left(uint16_t start, uint16_t stop) {
+	uint16_t estart = start, offset = 8, dist;
+
+	offset = 8;
+	estart = start;
+	select_lstream();
+	while (1) {
+		int errors = errors_in_block(start - offset, stop - offset, 4);
+		if (rfcfg->verbose)
+			printf("DECODER  left expand [%05u:%05u], errors=%d\n", start - offset, stop, errors);
+		if (errors > 4)
+			break;
+		estart = start - offset;
+		offset += 8;
+	}
+
+	dist = distance(estart, stop);
+	if (rfcfg->verbose)
+		printf("DECODER after left expanding   [%05u:%05u] %u samples\n", estart, stop, dist);
+
+	// fine tune left edge of code window - be very tolerant
+	estart += 8;
+	while (1) {
+		select_lstream();
+		int lmatch = symbol_match(stream[estart - 1]);
+		select_hstream();
+		int hmatch = symbol_match(stream[estart - 1]);
+		if (lmatch < 0 && hmatch < 0)
+			break; // first mismatch on both streams
+		estart--;
+	}
+
+	dist = distance(estart, stop);
+	if (rfcfg->verbose)
+		printf("DECODER after left edge tuning [%05u:%05u] %u samples\n", estart, stop, dist);
+
+	return estart;
+}
+
+// right code window expansion, here signal is reliable, so be very restrictive
+static uint16_t expand_right(uint16_t start, uint16_t stop) {
+	uint16_t estop = stop, offset = 8, dist, reserve;
+
+	expand_right: reserve = distance(stop, streampointer);
+	while (reserve > 8) {
+		int errors = errors_in_block(start + offset, stop + offset, 2);
+		if (rfcfg->verbose)
+			printf("DECODER right expand [%05u:%05u], errors=%d, reserve to streampointer[%05u]=%d\n", start, stop + offset, errors, streampointer, reserve);
+		if (errors > 2)
+			break;
+		reserve = distance(stop + offset, streampointer);
+		estop = stop + offset;
+		offset += 8;
+	}
+
+	// do error correction and symbol cleanup (<1%)
+	select_lstream();
+	error_correction(start, estop);
+	select_hstream();
+	error_correction(start, estop);
+
+	// mereg HIGH and LOW symbol tables
+	symbols_merge();
+
+	// cleanup symbol tables where occurrence < 1%
+	select_lstream();
+	symbols_clean(dist > 100 ? dist / 100 : 1);
+	select_hstream();
+	symbols_clean(dist > 100 ? dist / 100 : 1);
+
+	// fine tune right edge of code window
+	estop -= 8;
+	while (symbol_match_edge(estop + 1))
+		estop++;
+
+	dist = distance(start, estop);
+	if (rfcfg->verbose)
+		printf("DECODER after right edge tuning [%05u:%05u] %u samples\n", start, estop, dist);
+
+	// we found 2 fatal sampling errors
+	if (errors_in_block(estop + 10, estop + 18, 2) < 2) {
+		if (rfcfg->verbose)
+			printf("DECODER continue expand after sampling error at %05u samples\n", estop);
+		offset += 10;
+		goto expand_right;
+	}
+
+	return estop;
+}
+
 static uint16_t probe(uint16_t start, uint16_t stop) {
-	uint16_t estart, estop, dist, offset, reserve;
+	uint16_t estart, estop, dist;
 
 	// this is crap
 	dist = distance(start, stop);
@@ -474,83 +571,11 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 	select_hstream();
 	error_correction(start, stop);
 
-	// right code window expansion, here signal is very reliable
-	offset = 8;
-	estop = stop;
-	reserve = distance(stop, streampointer);
-	select_lstream();
-	while (reserve > 8) {
-		int errors = errors_in_block(start + offset, stop + offset, 2);
-		if (rfcfg->verbose)
-			printf("DECODER right expand [%05u:%05u], errors=%d, reserve to streampointer[%05u]=%d\n", start, stop + offset, errors, streampointer, reserve);
-		if (errors > 2)
-			break;
-		reserve = distance(stop + offset, streampointer);
-		estop = stop + offset;
-		offset += 8;
-	}
-
-	dist = distance(start, estop);
-	if (rfcfg->verbose)
-		printf("DECODER after right expanding   [%05u:%05u] %u samples\n", start, estop, dist);
+	estop = expand_right(start, stop);
+	estart = expand_left(start, stop);
 
 	// this is crap
-	if (dist < 16)
-		return stop + 1;
-
-	// do error correction again
-	select_lstream();
-	error_correction(start, estop);
-	select_hstream();
-	error_correction(start, estop);
-
-	// now delete all codes with occurrence < 1%, then we have a good symbol table
-	symbols_clean(dist > 100 ? dist / 100 : 1);
-
-	// fine tune right edge of code window - be very restrictive
-	estop -= 8;
-	while (symbol_match_edge(estop + 1))
-		estop++;
-
-	dist = distance(start, estop);
-	if (rfcfg->verbose)
-		printf("DECODER after right edge tuning [%05u:%05u] %u samples\n", start, estop, dist);
-
-	// left code window expansion - difficult because the signal slowly goes into noise on this side
-	offset = 8;
-	estart = start;
-	select_lstream();
-	while (1) {
-		int errors = errors_in_block(start - offset, stop - offset, 4);
-		if (rfcfg->verbose)
-			printf("DECODER  left expand [%05u:%05u], errors=%d\n", start - offset, stop, errors);
-		if (errors > 4)
-			break;
-		estart = start - offset;
-		offset += 8;
-	}
-
 	dist = distance(estart, estop);
-	if (rfcfg->verbose)
-		printf("DECODER after left expanding   [%05u:%05u] %u samples\n", estart, estop, dist);
-
-	// fine tune left edge of code window - be very tolerant
-	estart += 8;
-	while (1) {
-		select_lstream();
-		int lmatch = symbol_match(stream[estart - 1]);
-		select_hstream();
-		int hmatch = symbol_match(stream[estart - 1]);
-		if (lmatch < 0 && hmatch < 0)
-			break; // first mismatch on both streams
-		estart--;
-	}
-
-	dist = distance(estart, estop);
-	if (rfcfg->verbose)
-		printf("DECODER after left edge tuning [%05u:%05u] %u samples\n", estart, estop, dist);
-
-	// this is crap
 	if (dist < 16)
 		return stop + 1;
 
@@ -560,7 +585,7 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 //	select_hstream();
 //	error_correction(estart, estop);
 
-	select_lstream();
+	select_hstream();
 	if (rfcfg->verbose)
 		dump(estart, estop);
 
