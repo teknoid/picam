@@ -90,7 +90,7 @@ static uint16_t forw(uint16_t start, uint16_t positions) {
 	return start;
 }
 
-// counts the distance between the two stream positions
+// calculate the distance between two stream positions
 static uint16_t distance(uint16_t start, uint16_t stop) {
 	if (stop < start)
 		return (UINT16_MAX - start) + stop;
@@ -98,7 +98,7 @@ static uint16_t distance(uint16_t start, uint16_t stop) {
 		return stop - start;
 }
 
-// clears both streams between the two positions
+// clears both streams between the positions
 static void clear_streams(uint16_t start, uint16_t stop) {
 	uint16_t p = start - 1;
 	while (p++ != stop) {
@@ -266,7 +266,7 @@ static int match(uint8_t *xsymbols, uint8_t s, uint8_t d) {
 	return 0;
 }
 
-// same as match() and additionally increments hit counter
+// same as match() but additionally increments hit counter
 static int valid(uint8_t *xsymbols, uint8_t s, uint8_t d) {
 	uint16_t *xcounter = select_counter(xsymbols);
 
@@ -432,7 +432,7 @@ static uint16_t smallest(uint16_t start, uint16_t stop) {
 	return pmin;
 }
 
-// ironing symbols up to given distance
+// ironing stream up to minimum symbol distance
 static void iron(uint8_t *xstream, uint16_t start, uint16_t stop) {
 	uint16_t p;
 	uint8_t s, m, *xsymbols = select_symbols(xstream);
@@ -590,6 +590,7 @@ static uint16_t probe_left(uint16_t start) {
 	return p;
 }
 
+// consume the signal
 static void eat(uint16_t start, uint16_t stop) {
 	select_hstream();
 	if (rfcfg->verbose)
@@ -601,6 +602,7 @@ static void eat(uint16_t start, uint16_t stop) {
 		printf("DECODER probe_low 0x%016llx == %s probe_high 0x%016llx == %s\n", lcode, printbits64(lcode, SPACEMASK64), hcode, printbits64(hcode, SPACEMASK64));
 }
 
+// find begin and end of a signal by analyzing symbols
 static uint16_t probe(uint16_t start, uint16_t stop) {
 	uint16_t p, estart, estop, dist;
 
@@ -616,14 +618,14 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 		printf("DECODER L=low stream, H=high stream, symbol(valid), E=error counter, D=distance to stream head\n");
 
 	// find the smallest symbol - here we start symbol learning
-	// TODO eigentlich das am häufigsten auftretende
+	// TODO eigentlich das am häufigsten auftretende (?)
 	clear_tables();
 	p = smallest(start, stop);
 
 	if (rfcfg->verbose)
 		printf("DECODER smallest symbol L%d H%d at %05u \n", lstream[p], hstream[p], p);
 
-	// expand window to right, then left - right is more reliable due to signal goes into noise on the left side
+	// expand window to right, then left - right is more reliable due to signal goes into noise on left side
 	estop = probe_right(p, stop);
 	estart = probe_left(p);
 
@@ -654,7 +656,7 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 	while (tune(estart, 'l') < 30) // TODO größtes symbol * 3
 		estart--;
 
-	// this is crap
+	// this is again crap
 	dist = distance(estart, estop);
 	if (dist < 16)
 		return stop;
@@ -670,7 +672,7 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 	// die übrig gebliebenen fehler versuchen zu korrigieren:
 	// wenn in H nur ein einziges vorkommt dann das nehmen, wenn mehrere das mit der größten häufigkeit
 
-	// consume
+	// consume this stream window
 	eat(estart, estop);
 
 	// avoid re-catching this code
@@ -780,7 +782,7 @@ void* stream_decoder(void *arg) {
 		if (rfcfg->verbose)
 			printf("DECODER analyzing [%05u:%05u] %u samples\n", ptr, streampointer, block);
 
-		// pattern detector loop
+		// pattern sniffer loop
 		while (block > 8) {
 
 			// catch pattern by jumping 4-block-wise
@@ -802,7 +804,8 @@ void* stream_decoder(void *arg) {
 
 			// detailed symbol analyzing
 			ptr = probe(start, stop);
-			ptr++;
+
+			block = distance(++ptr, streampointer);
 		}
 	}
 	return (void*) 0;
