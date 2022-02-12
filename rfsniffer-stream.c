@@ -413,6 +413,23 @@ static void emphase(uint8_t *xsymbols) {
 		printf("\n");
 }
 
+// find the smallest symbol in given window
+static uint16_t smallest(uint16_t start, uint16_t stop) {
+	uint16_t pmin = start, p = start;
+	uint8_t l, h, min = 0xff;
+
+	while (p++ != stop) {
+		l = lstream[p];
+		h = hstream[p];
+		if (l && h && (l + h) < min) {
+			min = l + h;
+			pmin = p;
+		}
+	}
+
+	return pmin;
+}
+
 // ironing symbols up to given distance
 static void iron(uint8_t *xstream, uint16_t start, uint16_t stop) {
 	uint16_t p;
@@ -523,7 +540,7 @@ static uint16_t probe_right(uint16_t start, uint16_t stop) {
 }
 
 static uint16_t probe_left(uint16_t start) {
-	uint16_t p = start - 1;
+	uint16_t p = start + 1;
 	uint8_t l, lv, h, hv;
 
 	int e = 0;
@@ -560,26 +577,6 @@ static uint16_t probe_left(uint16_t start) {
 	return p;
 }
 
-// find the smallest symbol in given window
-static uint16_t smallest(uint16_t start, uint16_t stop) {
-	uint16_t pmin = start, p = start;
-	uint8_t l, h, min = 0xff;
-
-	while (p++ != stop) {
-		l = lstream[p];
-		h = hstream[p];
-		if (l && h && (l + h) < min) {
-			min = l + h;
-			pmin = p;
-		}
-	}
-
-	if (rfcfg->verbose)
-		printf("DECODER smallest symbol L%d H%d at %05u \n", lstream[pmin], h = hstream[pmin], pmin);
-
-	return pmin;
-}
-
 static uint16_t probe(uint16_t start, uint16_t stop) {
 	uint16_t p, estart, estop, dist;
 
@@ -598,6 +595,9 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 	// TODO eigentlich das am häufigsten auftretende
 	clear_tables();
 	p = smallest(start, stop);
+
+	if (rfcfg->verbose)
+		printf("DECODER smallest symbol L%d H%d at %05u \n", lstream[p], hstream[p], p);
 
 	// expand window to right, then left - right is more reliable due to signal goes into noise on the left side
 	estop = probe_right(p, stop);
