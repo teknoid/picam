@@ -11,7 +11,6 @@
 #include "rfsniffer.h"
 #include "utils.h"
 
-#define BUFFER				0xff
 #define BLOCKSIZE			64
 #define SYMBOLS				16
 
@@ -19,7 +18,7 @@ static const char L = 'L';
 static const char H = 'H';
 
 // ring buffers for low and high pulses
-static uint8_t *stream, lstream[0xffff], hstream[0xffff];
+static uint8_t *stream, lstream[UINT16_MAX], hstream[UINT16_MAX];
 static uint16_t streampointer;
 
 static int receiving_counter = 0;
@@ -93,7 +92,10 @@ static uint16_t forw(uint16_t start, uint16_t positions) {
 
 // counts the distance between the two stream positions
 static uint16_t distance(uint16_t start, uint16_t stop) {
-	return start <= stop ? stop - start : 0xffff - stop + start;
+	if (stop < start)
+		return (UINT16_MAX - start) + stop;
+	else
+		return stop - start;
 }
 
 // clears both streams between the two positions
@@ -240,7 +242,7 @@ static uint8_t symbol_distance(uint8_t *xsymbols) {
 		for (int y = x + 1; y < SYMBOLS; y++) {
 			if (!xsymbols[y])
 				break;
-			m = xsymbols[x] < xsymbols[y] ? xsymbols[y] - xsymbols[x] : xsymbols[x] - xsymbols[y];
+			m = xsymbols[x] < xsymbols[y] ? (xsymbols[y] - xsymbols[x]) : (xsymbols[x] - xsymbols[y]);
 			if (m < min)
 				min = m;
 		}
@@ -393,7 +395,7 @@ static void emphase(uint8_t *xsymbols) {
 			for (int y = x + 1; y < SYMBOLS; y++) {
 				if (!xsymbols[y])
 					break;
-				d = xsymbols[x] < xsymbols[y] ? xsymbols[y] - xsymbols[x] : xsymbols[x] - xsymbols[y];
+				d = xsymbols[x] < xsymbols[y] ? (xsymbols[y] - xsymbols[x]) : (xsymbols[x] - xsymbols[y]);
 				if (d <= dmin) {
 					printf("%d<-%d ", xsymbols[x], xsymbols[y]);
 					xcounter[x] += xcounter[y];
@@ -483,12 +485,12 @@ static uint16_t tune(uint16_t pos, const char direction) {
 		e = 10; // TODO heavy sampling error but we must tolerate
 
 	if (lv)
-		e += lv > l ? lv - l : l - lv;
+		e += lv > l ? (lv - l) : (l - lv);
 	if (!lv)
 		e += l;
 
 	if (hv)
-		e += hv > h ? hv - h : h - hv;
+		e += hv > h ? (hv - h) : (h - hv);
 	if (!hv)
 		e += h;
 
@@ -621,7 +623,7 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 		printf("DECODER probe window [%05u:%05u] %u samples\n", estart, estop, dist);
 
 	// remove all symbols with occurrence below 1%
-	filter(dist < 100 ? 1 : dist / 100);
+	filter(dist > 100 ? dist / 100 : 1);
 
 	// merge similar symbols together
 	emphase(lsymbols);
@@ -639,7 +641,11 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 	while (tune(estart, 'l') < 30) // TODO größtes symbol * 3
 		estart--;
 
+	// this is crap
 	dist = distance(estart, estop);
+	if (dist < 16)
+		return stop + 1;
+
 	if (rfcfg->verbose)
 		printf("DECODER tuned window [%05u:%05u] %u samples\n", estart, estop, dist);
 
