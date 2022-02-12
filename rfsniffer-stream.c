@@ -473,6 +473,9 @@ static uint16_t tune(uint16_t pos, const char direction) {
 	l = lstream[pos];
 	h = hstream[pos];
 
+	if (!l && !h)
+		return 999; // dead stream
+
 	lv = valid(lsymbols, l, dist);
 	hv = valid(hsymbols, h, dist);
 
@@ -509,6 +512,9 @@ static uint16_t probe_right(uint16_t start, uint16_t stop) {
 	while (p++ != streampointer - 1) {
 		l = lstream[p];
 		h = hstream[p];
+
+		if (!l && !h)
+			break; // dead stream
 
 		lv = valid(lsymbols, l, 1);
 		hv = valid(hsymbols, h, 1);
@@ -547,6 +553,9 @@ static uint16_t probe_left(uint16_t start) {
 	while (p-- != streampointer + 1) {
 		l = lstream[p];
 		h = hstream[p];
+
+		if (!l && !h)
+			break; // dead stream
 
 		lv = valid(lsymbols, l, 1);
 		hv = valid(hsymbols, h, 1);
