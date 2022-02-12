@@ -446,9 +446,11 @@ static void iron(uint8_t *xstream, uint16_t start, uint16_t stop) {
 		p = start - 1;
 		int fixed = 0;
 		while (p++ != stop) {
+
 			s = xstream[p];
 			if (!s)
 				continue;
+
 			m = match(xsymbols, s, i);
 			if (!m)
 				continue;
@@ -588,13 +590,24 @@ static uint16_t probe_left(uint16_t start) {
 	return p;
 }
 
+static void eat(uint16_t start, uint16_t stop) {
+	select_hstream();
+	if (rfcfg->verbose)
+		dump(start, stop);
+
+	uint64_t lcode = probe_low(stop - 64, 64, 15);
+	uint64_t hcode = probe_high(stop - 64, 64, 6);
+	if (rfcfg->verbose)
+		printf("DECODER probe_low 0x%016llx == %s probe_high 0x%016llx == %s\n", lcode, printbits64(lcode, SPACEMASK64), hcode, printbits64(hcode, SPACEMASK64));
+}
+
 static uint16_t probe(uint16_t start, uint16_t stop) {
 	uint16_t p, estart, estop, dist;
 
 	// this is crap
 	dist = distance(start, stop);
 	if (dist < 16)
-		return stop + 1;
+		return stop;
 
 	if (rfcfg->verbose)
 		printf("DECODER probing [%05u:%05u] %u samples\n", start, stop, dist);
@@ -617,7 +630,7 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 	// this is crap
 	dist = distance(estart, estop);
 	if (dist < 16)
-		return stop + 1;
+		return stop;
 
 	if (rfcfg->verbose)
 		printf("DECODER probe window [%05u:%05u] %u samples\n", estart, estop, dist);
@@ -644,7 +657,7 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 	// this is crap
 	dist = distance(estart, estop);
 	if (dist < 16)
-		return stop + 1;
+		return stop;
 
 	if (rfcfg->verbose)
 		printf("DECODER tuned window [%05u:%05u] %u samples\n", estart, estop, dist);
@@ -654,25 +667,20 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 	iron(hstream, estart, estop);
 
 	// hammer()
-	// die übrig gebliebenen fehler versuchen zu korrigieren
-	// wehh H nur ein einziges vorkommt dann das nehemn, wenn mehrere das mit der größten häufigkeit
+	// die übrig gebliebenen fehler versuchen zu korrigieren:
+	// wenn in H nur ein einziges vorkommt dann das nehmen, wenn mehrere das mit der größten häufigkeit
 
-	select_hstream();
-	if (rfcfg->verbose)
-		dump(estart, estop);
-
-	uint64_t lcode = probe_low(estop - 64, 64, 15);
-	uint64_t hcode = probe_high(estop - 64, 64, 6);
-	if (rfcfg->verbose)
-		printf("DECODER probe_low 0x%016llx == %s probe_high 0x%016llx == %s\n", lcode, printbits64(lcode, SPACEMASK64), hcode, printbits64(hcode, SPACEMASK64));
+	// consume
+	eat(estart, estop);
 
 	// avoid re-catching this code
 	clear_streams(estart, estop);
-	return estop + 1;
+
+	return estop;
 }
 
 // dumb 4-block symbol pattern matching
-static int pattern(uint16_t start) {
+static int sniff(uint16_t start) {
 	uint8_t p0 = stream[start], p1 = stream[start + 1], p2 = stream[start + 2], p3 = stream[start + 3];
 
 	// contains zeros
@@ -776,32 +784,25 @@ void* stream_decoder(void *arg) {
 		while (block > 8) {
 
 			// catch pattern by jumping 4-block-wise
-			if (!pattern(ptr)) {
+			if (!sniff(ptr)) {
 				ptr = forw(ptr, 4);
 				block -= 4;
 				continue;
 			}
 
-			// rewind till we find the first match
 			uint16_t start = ptr;
-			for (int i = 0; i < 6; i++)
-				if (pattern(start - 1))
-					start--;
 
 			// jump forward till no match
-			while (block > 4 && pattern(ptr)) {
+			while (sniff(ptr + 4) && block > 4) {
 				ptr = forw(ptr, 4);
 				block -= 4;
 			}
 
-			// rewind till it again matches
 			uint16_t stop = ptr;
-			for (int i = 0; i < 4; i++)
-				if (!pattern(stop - 1))
-					stop--;
 
-			// deeper analyze, right edge of pattern window
-			ptr = probe(start, stop + 3);
+			// detailed symbol analyzing
+			ptr = probe(start, stop);
+			ptr++;
 		}
 	}
 	return (void*) 0;
