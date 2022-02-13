@@ -110,9 +110,6 @@ void* realtime_sampler(void *arg) {
 	// initialize tLast for correct 1st pulse calculation
 	last = gpio_micros();
 
-	// initialize the matrix
-	matrix_init();
-
 	state = -1;
 	if (rfcfg->analyzer_mode) {
 		state = -2;

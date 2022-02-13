@@ -354,6 +354,9 @@ int rfsniffer_init() {
 	if (gpio_init())
 		return -1;
 
+	// initialize the matrix
+	matrix_init();
+
 	void *sampler = 0, *decoder = 0;
 	if (rfcfg->realtime_mode) {
 		sampler = &realtime_sampler;
