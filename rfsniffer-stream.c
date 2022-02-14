@@ -827,10 +827,9 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 	// estimate signal strength based on time to next sample
 	uint8_t lnext = lstream[estop], hnext = rfcfg->sample_on_0 ? hstream[estop + 1] : hstream[estop];
 	uint16_t lsnext = lsamples[estop], hsnext = rfcfg->sample_on_0 ? hsamples[estop + 1] : hsamples[estop];
-	uint32_t snext = lsnext > hsnext ? lsnext : hsnext;
-	uint32_t strength = snext * 100 / UINT16_MAX;
+	uint32_t strength = (lsnext + hsnext) * 100 / (UINT16_MAX * 2);
 	if (rfcfg->verbose)
-		printf("DECODER signal strength    %u%%   estimated from L+1 %d(%u)   H+1 %d(%u)\n", strength, lnext, lsnext, hnext, hsnext);
+		printf("DECODER signal strength   %u%%   estimated from EOT   L+1 %d(%u)   H+1 %d(%u)\n", strength, lnext, lsnext, hnext, hsnext);
 
 	// consume this stream window
 	eat(estart, estop);
