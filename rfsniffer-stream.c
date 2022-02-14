@@ -173,6 +173,34 @@ static uint8_t biggest_symbol(uint8_t *xsymbols) {
 	return max;
 }
 
+// find the smallest sample in given window and return it's position
+static uint16_t smallest_sample(uint8_t *xstream, uint16_t start, uint16_t stop) {
+	uint16_t pmin = start - 1, p = start - 1;
+	uint8_t s, min = UINT8_MAX;
+	while (p++ != stop) {
+		s = xstream[p];
+		if (s && (s < min)) {
+			min = s;
+			pmin = p;
+		}
+	}
+	return pmin;
+}
+
+// find the biggest sample in given window and return it's position
+static uint16_t biggest_sample(uint8_t *xstream, uint16_t start, uint16_t stop) {
+	uint16_t pmax = start - 1, p = start - 1;
+	uint8_t s, max = 0;
+	while (p++ != stop) {
+		s = xstream[p];
+		if (s && (s > max)) {
+			max = s;
+			pmax = p;
+		}
+	}
+	return pmax;
+}
+
 static void clear_tables() {
 	memset(lsymbols, 0, SYMBOLS * sizeof(uint8_t));
 	memset(lcounter, 0, SYMBOLS * sizeof(uint16_t));
@@ -282,42 +310,68 @@ static uint8_t symbol_distance(uint8_t *xsymbols) {
 	return min == 0xff ? xsymbols[0] : min; // only one symbol?
 }
 
-// compare symbol against table, if valid in given distance return the matching symbol else 0
-static int match(uint8_t *xsymbols, uint8_t s, uint8_t d) {
+// returns the best matching symbol for given distance
+static uint8_t valid(uint8_t *xsymbols, uint8_t s, uint8_t d) {
+	uint8_t t, td, tdmin = UINT8_MAX, tmin = 0;
+	if (!s)
+		return 0;
+	// 1st round: try to find equals match
 	for (int i = 0; i < SYMBOLS; i++) {
-		uint8_t t = xsymbols[i];
+		t = xsymbols[i];
 		if (!t)
 			break; // table end
 		if (s == t)
 			return t;
-		if (t < d)
-			continue; // too small for distance
-		if ((t - d) <= s && s <= (t + d))
-			return t;
 	}
-	return 0;
+	// 2nd round: find the best match with minimal distance
+	for (int i = 0; i < SYMBOLS; i++) {
+		t = xsymbols[i];
+		if (!t)
+			break; // table end
+		if (t < d)
+			continue;
+		td = t > s ? t - s : s - t;
+		if (td > d)
+			continue;
+		if (td < tdmin) {
+			tdmin = td;
+			tmin = t;
+		}
+	}
+	return tmin;
 }
 
-// same as match() but additionally increments hit counter
-static int valid(uint8_t *xsymbols, uint8_t s, uint8_t d) {
+// same as valid() but additionally increments the hit counter of the matching symbol
+static uint8_t valid_hit(uint8_t *xsymbols, uint8_t s, uint8_t d) {
 	uint16_t *xcounter = select_counter(xsymbols);
-
+	uint8_t t, td, tdmin = UINT8_MAX, tmin = 0;
+	if (!s)
+		return 0;
 	for (int i = 0; i < SYMBOLS; i++) {
-		uint8_t t = xsymbols[i];
+		t = xsymbols[i];
 		if (!t)
 			break; // table end
 		if (s == t) {
 			xcounter[i]++;
-			return s;
-		}
-		if (t < d)
-			continue; // too small for distance
-		if ((t - d) <= s && s <= (t + d)) {
-			xcounter[i]++;
 			return t;
 		}
 	}
-	return 0;
+	for (int i = 0; i < SYMBOLS; i++) {
+		t = xsymbols[i];
+		if (!t)
+			break; // table end
+		if (t < d)
+			continue;
+		td = t > s ? t - s : s - t;
+		if (td > d)
+			continue;
+		if (td < tdmin) {
+			tdmin = td;
+			tmin = t;
+			xcounter[i]++;
+		}
+	}
+	return tmin;
 }
 
 static void learn(uint8_t *xsymbols, uint8_t s, const char direction) {
@@ -328,13 +382,13 @@ static void learn(uint8_t *xsymbols, uint8_t s, const char direction) {
 		return;
 
 	// right: symbols only allowed to grow, not shrink
-	uint8_t lmin = smallest_symbol(lsymbols), hmin = smallest_symbol(hsymbols);
-	if (direction == R && s < lmin && s < hmin)
+	uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
+	if (direction == R && s < lmax && s < hmax)
 		return;
 
 	// left: symbols only allowed to shrink, not grow
-	uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
-	if (direction == L && s > lmax && s > hmax)
+	uint8_t lmin = smallest_symbol(lsymbols), hmin = smallest_symbol(hsymbols);
+	if (direction == L && s > lmin && s > hmin)
 		return;
 
 	// find next free entry
@@ -467,38 +521,6 @@ static void filter(uint16_t samples) {
 		dump_tables("after melt    ");
 }
 
-// find the smallest sample in given window and return it's position
-static uint16_t smallest_sample(uint8_t *xstream, uint16_t start, uint16_t stop) {
-	uint16_t pmin = start - 1, p = start - 1;
-	uint8_t s, min = UINT8_MAX;
-
-	while (p++ != stop) {
-		s = xstream[p];
-		if (s && (s < min)) {
-			min = s;
-			pmin = p;
-		}
-	}
-
-	return pmin;
-}
-
-// find the biggest sample in given window and return it's position
-static uint16_t biggest_sample(uint8_t *xstream, uint16_t start, uint16_t stop) {
-	uint16_t pmax = start - 1, p = start - 1;
-	uint8_t s, max = 0;
-
-	while (p++ != stop) {
-		s = xstream[p];
-		if (s && (s > max)) {
-			max = s;
-			pmax = p;
-		}
-	}
-
-	return pmax;
-}
-
 // soft ironing stream up to minimum symbol distance
 static void iron(uint8_t *xstream, uint16_t start, uint16_t stop) {
 	uint16_t p;
@@ -518,7 +540,7 @@ static void iron(uint8_t *xstream, uint16_t start, uint16_t stop) {
 			if (!s)
 				continue;
 
-			m = match(xsymbols, s, i);
+			m = valid(xsymbols, s, i);
 			if (!m)
 				continue;
 			if (m != s) {
@@ -559,8 +581,8 @@ static void hammer(uint16_t start, uint16_t stop) {
 		l = lstream[p];
 		h = hstream[p];
 
-		lv = valid(lsymbols, l, 0);
-		hv = valid(hsymbols, h, 0);
+		lv = valid_hit(lsymbols, l, 0);
+		hv = valid_hit(hsymbols, h, 0);
 
 		if (!lv) {
 			invalid++;
@@ -585,29 +607,43 @@ static void hammer(uint16_t start, uint16_t stop) {
 	}
 }
 
-static int tune(uint16_t pos, uint8_t lmin, uint8_t hmin, const char direction) {
+static int tune(uint16_t pos, const char direction) {
 	uint16_t e = 0;
-	uint8_t l, h, lv, hv;
+	uint8_t l, h, ll, hl, lh, hh;
+
+	// smallest + biggest symbols
+	// uint8_t lmin = smallest_symbol(lsymbols), hmin = smallest_symbol(hsymbols);
+	uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
 
 	l = lstream[pos];
 	h = hstream[pos];
 
 	if (!l && !h)
-		return 0; // dead stream
+		e = UINT8_MAX; // error or dead stream
 
-	// allow more distance to be fault tolerant for that position
-	lv = match(lsymbols, l, 3);
-	hv = match(hsymbols, h, 3);
+	// border hard right hit -> EOT
+	if (direction == R)
+		if (l == UINT8_MAX || h == UINT8_MAX)
+			e = UINT8_MAX;
 
-	if (lv)
-		e += lv > l ? (lv - l) : (l - lv);
-	if (!lv)
-		e += l < lmin ? lmin : l;
+	// bigger than biggest on the left is not allowed
+	if (direction == L)
+		if (l > (lmax + 5) || h > (hmax + 5))
+			e = UINT8_MAX;
 
-	if (hv)
-		e += hv > h ? (hv - h) : (h - hv);
-	if (!hv)
-		e += h < hmin ? hmin : h;
+	// allow more distance to be fault tolerant on a single position
+	ll = valid(lsymbols, l, 5);
+	hl = valid(hsymbols, l, 5);
+	lh = valid(lsymbols, h, 5);
+	hh = valid(hsymbols, h, 5);
+
+	// l not valid in l/h
+	if (!ll && !hl)
+		e = 1;
+
+	// h not valid in l/h
+	if (!lh & !hh)
+		e = 2;
 
 	if (rfcfg->verbose) {
 		printf("DECODER tune ");
@@ -615,27 +651,31 @@ static int tune(uint16_t pos, uint8_t lmin, uint8_t hmin, const char direction) 
 			printf("◄%05u  ", pos);
 		if (direction == R)
 			printf(" %05u► ", pos);
-		printf("   L %3d(%2d)   H %3d(%2d)   E %d\n", l, lv, h, hv, e);
+		printf("   L %3d(%2d,%2d)   H %3d(%2d,%2d)   E %d\n", l, ll, hl, h, lh, hh, e);
 	}
 
-	return e < (lmin + hmin);
+	return !e;
 }
 
 static uint16_t probe_left(uint16_t start) {
 	uint16_t p = start + 1;
-	uint8_t l, lv, h, hv, lmin, hmin;
+	uint8_t l, lv, h, hv;
 
-	// to the right we already collected symbols - use them for error calculation
-	lmin = smallest_symbol(lsymbols);
-	hmin = smallest_symbol(hsymbols);
+	// to the right we already collected symbols - use them as error indicator
+	uint8_t lmin = smallest_symbol(lsymbols), hmin = smallest_symbol(hsymbols);
+	uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
 
-	int e = 0;
+	int e = 0; // floating error counter
 	while (p-- != streampointer + 1) {
 		l = lstream[p];
 		h = hstream[p];
 
 		if (!l && !h)
 			break; // dead stream
+
+		// biggest on left - might be a sync, but bigger are not allowed
+		if (l > (lmax + hmax) || h > (lmax + hmax))
+			e = UINT8_MAX;
 
 		// take the next left as error - if its valid then error is healed on next position
 		if (!l)
@@ -644,8 +684,8 @@ static uint16_t probe_left(uint16_t start) {
 			e += hstream[p - 1];
 
 		// small distance because we want to learn
-		lv = valid(lsymbols, l, 1);
-		hv = valid(hsymbols, h, 1);
+		lv = valid_hit(lsymbols, l, 1);
+		hv = valid_hit(hsymbols, h, 1);
 
 		if (lv)
 			e -= l;
@@ -667,19 +707,19 @@ static uint16_t probe_left(uint16_t start) {
 		printf("DECODER probe ◄%05d   %3d(%2d) L   %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
 
 		// tolerate sampling errors, but too much -> jump out
-		if (e > 3 * (lmin + hmin))
+		if (e > 5 * (lmin + hmin))
 			break;
 	}
 	return p;
 }
 
 static uint16_t probe_right(uint16_t start, uint16_t stop) {
-	uint16_t p;
+	uint16_t p, pmin;
 	uint8_t l, lv, h, hv, lmin, hmin, lmax, hmax;
 
 	// find the smallest samples per stream
-	p = smallest_sample(lstream, start, stop);
-	lmin = lstream[p];
+	pmin = smallest_sample(lstream, start, stop);
+	lmin = lstream[pmin];
 	p = smallest_sample(hstream, start, stop);
 	hmin = hstream[p];
 
@@ -696,7 +736,8 @@ static uint16_t probe_right(uint16_t start, uint16_t stop) {
 	if (rfcfg->verbose)
 		printf("DECODER smallest symbols   L%d   H%d   biggest symbols   L%d   H%d\n", lmin, hmin, lmax, hmax);
 
-	int e = 0;
+	p = pmin - 1;
+	int e = 0; // floating error counter
 	while (p++ != streampointer - 1) {
 		l = lstream[p];
 		h = hstream[p];
@@ -711,8 +752,8 @@ static uint16_t probe_right(uint16_t start, uint16_t stop) {
 			e += hstream[p + 1];
 
 		// small distance because we want to learn
-		lv = valid(lsymbols, l, 1);
-		hv = valid(hsymbols, h, 1);
+		lv = valid_hit(lsymbols, l, 1);
+		hv = valid_hit(hsymbols, h, 1);
 
 		if (lv)
 			e -= l;
@@ -733,8 +774,12 @@ static uint16_t probe_right(uint16_t start, uint16_t stop) {
 
 		printf("DECODER probe  %05d►  %3d(%2d) L   %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
 
-		// tolerate sampling errors, but too much -> jump out
-		if (e > 2 * (lmax + hmax))
+		// definitive reached EOT
+		if (e >= UINT8_MAX)
+			break;
+
+		// tolerate sampling errors and learn big symbols, e.g. SYNC
+		if (e > 5 * (lmax + hmax))
 			break;
 	}
 	return p;
@@ -773,21 +818,14 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 	// filter, sort and melt the symbol tables
 	filter(dist);
 
-	// smallest + biggest symbols
-	uint8_t lmin = smallest_symbol(lsymbols), hmin = smallest_symbol(hsymbols);
-	uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
-
-	if (rfcfg->verbose)
-		printf("DECODER smallest = L%d H%d    biggest = L%d H%d\n", lmin, hmin, lmax, hmax);
-
-	// fine tune right edge of window - very restrictive
-	estop -= 16;
-	while (tune(estop, lmin, hmin, R))
+	// fine tune right edge of window
+	estop -= 8;
+	while (tune(estop, R))
 		estop++;
 
-	// fine tune left edge of window - very tolerant TODO - was sollen wir mit den fehlerhaften links machen ???
+	// fine tune left edge of window
 	estart += 16;
-	while (tune(estart, lmin, hmin, L))
+	while (tune(estart, L))
 		estart--;
 
 	// this is again crap
@@ -812,7 +850,7 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 	uint32_t snext = lsnext > hsnext ? lsnext : hsnext;
 	uint32_t strength = snext * 100 / UINT16_MAX;
 	if (rfcfg->verbose)
-		printf("DECODER signal strength %u%%   estimated from L+1 %d(%u)   H+1 %d(%u)\n", strength, lnext, lsnext, hnext, hsnext);
+		printf("DECODER signal strength    %u%%   estimated from L+1 %d(%u)   H+1 %d(%u)\n", strength, lnext, lsnext, hnext, hsnext);
 
 	// consume this stream window
 	eat(estart, estop);
@@ -832,7 +870,9 @@ static void scale(uint16_t start, uint16_t stop) {
 		sl = lsamples[p];
 		sh = hsamples[p];
 
-		// too big - multiple signals at same time, receiver sensitivity was overridden by the stronger
+		// TODO noise ?
+
+		// too big - ? multiple signals at same time, receiver sensitivity was overridden by the stronger
 		if (sl > smax)
 			sl = smax;
 		if (sh > smax)
@@ -980,7 +1020,8 @@ void* stream_decoder(void *arg) {
 			uint16_t stop = p1;
 
 			// detailed symbol analyzing
-			p1 = probe(start, stop);
+			if (start != stop)
+				p1 = probe(start, stop);
 
 			block = distance(++p1, p2);
 		}

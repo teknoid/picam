@@ -75,7 +75,7 @@ rfsniffer_config_t *rfcfg;
 
 #ifdef RFSNIFFER_MAIN
 static int usage() {
-	printf("Usage: rfsniffer -v -q -jX -fX -c -nX -dX -a -r -Tc -bX -sX -SX -xX -yX -zX\n");
+	printf("Usage: rfsniffer -v -q -jX -fX -c -nX -dX -a -r -0 -1 -Tc -bX -sX -SX -xX -yX -zX\n");
 	printf("  void  normal mode, sync on known pulses, sample and decode messages\n");
 	printf("  -v    verbose console output\n");
 	printf("  -q    no console output except errors\n");
@@ -88,10 +88,11 @@ static int usage() {
 	printf("  -d X  decoder delay in milli seconds, default 1000\n");
 	printf("  -a    analyzer mode\n");
 	printf("  -r    realtime mode\n");
+	printf("  -0    sample on 0\n");
+	printf("  -1    sample on 1 (default)\n");
 	printf("  -T c  run unit tests and decode <c>");
 	printf("  -b X  analyzer: bits to sample (0 - 64) default 32\n");
 	printf("  -s X  analyzer: sync on pulse 0=LOW (default) 1=HIGH 2=EDGE)\n");
-	printf("  -S X  analyzer: sample on pulse 0=LOW (default) 1=HIGH 2=EDGE)\n");
 	printf("  -x X  analyzer: sync pulse min length in microseconds/10\n");
 	printf("  -y X  analyzer: sync pulse max length in microseconds/10\n");
 	printf("  -z X  analyzer: 0/1 bit divider pulse length in microseconds/10\n");
@@ -107,7 +108,7 @@ static int rfsniffer_main(int argc, char **argv) {
 
 	if (argc > 0) {
 		int c, i;
-		while ((c = getopt(argc, argv, "ab:cd:ef:jn:qrs:S:tTvx:y:z:")) != -1) {
+		while ((c = getopt(argc, argv, "ab:cd:ef:jn:qr01s:S:tTvx:y:z:")) != -1) {
 			switch (c) {
 			case 'a':
 				rfcfg->analyzer_mode = 1;
@@ -140,6 +141,14 @@ static int rfsniffer_main(int argc, char **argv) {
 				rfcfg->stream_mode = 0;
 				rfcfg->realtime_mode = 1;
 				break;
+			case '0':
+				rfcfg->sample_on_0 = 1;
+				rfcfg->sample_on_1 = 0;
+				break;
+			case '1':
+				rfcfg->sample_on_0 = 0;
+				rfcfg->sample_on_1 = 1;
+				break;
 			case 's':
 				i = atoi(optarg);
 				switch (i) {
@@ -154,23 +163,6 @@ static int rfsniffer_main(int argc, char **argv) {
 				case 2:
 					rfcfg->sync_on_0 = 1;
 					rfcfg->sync_on_1 = 1;
-					break;
-				}
-				break;
-			case 'S':
-				i = atoi(optarg);
-				switch (i) {
-				case 0:
-					rfcfg->sample_on_0 = 1;
-					rfcfg->sample_on_1 = 0;
-					break;
-				case 1:
-					rfcfg->sample_on_0 = 0;
-					rfcfg->sample_on_1 = 1;
-					break;
-				case 2:
-					rfcfg->sample_on_0 = 1;
-					rfcfg->sample_on_1 = 1;
 					break;
 				}
 				break;
@@ -333,8 +325,8 @@ rfsniffer_config_t* rfsniffer_default_config() {
 	rfcfg->collect_identical_codes = 1;
 	rfcfg->sync_on_0 = 1;
 	rfcfg->sync_on_1 = 0;
-	rfcfg->sample_on_0 = 1;
-	rfcfg->sample_on_1 = 0;
+	rfcfg->sample_on_0 = 0;
+	rfcfg->sample_on_1 = 1;
 	rfcfg->sync_min = 3800;
 	rfcfg->sync_max = 4200;
 	rfcfg->bitdivider = 3000;
