@@ -14,7 +14,6 @@
  * - NEXUS Weather sensor
  */
 
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -23,6 +22,7 @@
 #include <unistd.h>
 #include <poll.h>
 #include <syslog.h>
+#include <pthread.h>
 
 #include "rfsniffer.h"
 #include "rfcodec.h"

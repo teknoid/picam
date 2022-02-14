@@ -187,20 +187,6 @@ static uint16_t smallest_sample(uint8_t *xstream, uint16_t start, uint16_t stop)
 	return pmin;
 }
 
-// find the biggest sample in given window and return it's position
-static uint16_t biggest_sample(uint8_t *xstream, uint16_t start, uint16_t stop) {
-	uint16_t pmax = start - 1, p = start - 1;
-	uint8_t s, max = 0;
-	while (p++ != stop) {
-		s = xstream[p];
-		if (s && (s > max)) {
-			max = s;
-			pmax = p;
-		}
-	}
-	return pmax;
-}
-
 static void clear_tables() {
 	memset(lsymbols, 0, SYMBOLS * sizeof(uint8_t));
 	memset(lcounter, 0, SYMBOLS * sizeof(uint16_t));
@@ -328,8 +314,6 @@ static uint8_t valid(uint8_t *xsymbols, uint8_t s, uint8_t d) {
 		t = xsymbols[i];
 		if (!t)
 			break; // table end
-		if (t < d)
-			continue;
 		td = t > s ? t - s : s - t;
 		if (td > d)
 			continue;
@@ -360,8 +344,6 @@ static uint8_t valid_hit(uint8_t *xsymbols, uint8_t s, uint8_t d) {
 		t = xsymbols[i];
 		if (!t)
 			break; // table end
-		if (t < d)
-			continue;
 		td = t > s ? t - s : s - t;
 		if (td > d)
 			continue;
@@ -441,12 +423,12 @@ static void sort(uint8_t *xsymbols) {
 	} while (repeat);
 }
 
-// determine valid symbols and melt adjacent together
-static void melt(uint8_t *xsymbols) {
+// straighten symbols
+static void align(uint8_t *xsymbols) {
 	uint16_t *xcounter = select_counter(xsymbols);
 
 	if (rfcfg->verbose)
-		printf("DECODER %c melting ", xsymbols == lsymbols ? L : H);
+		printf("DECODER %c aligning ", xsymbols == lsymbols ? L : H);
 
 	// find minimum symbol distance
 	uint8_t d, dmin = symbol_distance(xsymbols);
@@ -456,7 +438,7 @@ static void melt(uint8_t *xsymbols) {
 	while (dmin < s) {
 
 		if (rfcfg->verbose)
-			printf("   d=%d s=%d ", dmin, s);
+			printf("    d=%d s=%d ", dmin, s);
 
 		// do the merge for current distance
 		for (int x = 0; x < SYMBOLS; x++) {
@@ -514,11 +496,16 @@ static void filter(uint16_t samples) {
 		dump_tables("after filter  ");
 
 	// melt
-	melt(lsymbols);
-	melt(hsymbols);
+	align(lsymbols);
+	align(hsymbols);
 
 	if (rfcfg->verbose)
-		dump_tables("after melt    ");
+		dump_tables("after align   ");
+}
+
+static void melt(uint16_t start, uint16_t stop) {
+	if (rfcfg->verbose)
+		printf("DECODER melting ");
 }
 
 // soft ironing stream up to minimum symbol distance
@@ -714,29 +701,23 @@ static uint16_t probe_left(uint16_t start) {
 }
 
 static uint16_t probe_right(uint16_t start, uint16_t stop) {
-	uint16_t p, pmin;
-	uint8_t l, lv, h, hv, lmin, hmin, lmax, hmax;
+	uint16_t p;
+	uint8_t l, lv, h, hv, lmin, hmin;
 
-	// find the smallest samples per stream
-	pmin = smallest_sample(lstream, start, stop);
-	lmin = lstream[pmin];
+	// find the smallest H sample and learn it
 	p = smallest_sample(hstream, start, stop);
 	hmin = hstream[p];
-
-	// find the biggest samples per stream
-	p = biggest_sample(lstream, start, stop);
-	lmax = lstream[p];
-	p = biggest_sample(hstream, start, stop);
-	hmax = hstream[p];
-
-	// initially learn the smallest samples
-	learn(lsymbols, lmin, R);
 	learn(hsymbols, hmin, R);
 
-	if (rfcfg->verbose)
-		printf("DECODER smallest symbols   L%d   H%d   biggest symbols   L%d   H%d\n", lmin, hmin, lmax, hmax);
+	// find the smallest L sample and learn them - also her we start expanding to right
+	p = smallest_sample(lstream, start, stop);
+	lmin = lstream[p];
+	learn(lsymbols, lmin, R);
 
-	p = pmin - 1;
+	if (rfcfg->verbose)
+		printf("DECODER initially learned smallest symbols   L%d   H%d\n", lmin, hmin);
+
+	p--;
 	int e = 0; // floating error counter
 	while (p++ != streampointer - 1) {
 		l = lstream[p];
@@ -774,12 +755,8 @@ static uint16_t probe_right(uint16_t start, uint16_t stop) {
 
 		printf("DECODER probe  %05d►  %3d(%2d) L   %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
 
-		// definitive reached EOT
+		// reached EOT
 		if (e >= UINT8_MAX)
-			break;
-
-		// tolerate sampling errors and learn big symbols, e.g. SYNC
-		if (e > 5 * (lmax + hmax))
 			break;
 	}
 	return p;
@@ -835,6 +812,9 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 
 	if (rfcfg->verbose)
 		printf("DECODER tuned window [%05u:%05u] %u samples\n", estart, estop, dist);
+
+	// melt short spikes (H0, H1) to the next position
+	melt(estart, estop);
 
 	// symbol soft error correction
 	iron(lstream, estart, estop);
