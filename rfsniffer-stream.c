@@ -363,14 +363,24 @@ static void learn(uint8_t *xsymbols, uint8_t s, const char direction) {
 	if (!s || s == 1 || s == UINT8_MAX)
 		return;
 
-	// right: symbols only allowed to grow, not shrink
+	// right: symbols only allowed to grow, not shrink, max grow is biggest * 2
 	uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
-	if (direction == R && s < lmax && s < hmax)
+	if (direction == R && s < lmax && s < hmax && (s > lmax * 2 + 5))
 		return;
 
-	// left: symbols only allowed to shrink, not grow
+	// left: symbols only allowed to shrink, not grow, except multiples of the smallest
 	uint8_t lmin = smallest_symbol(lsymbols), hmin = smallest_symbol(hsymbols);
-	if (direction == L && s > lmin && s > hmin)
+	int multiple = 0, m1 = 1, m2 = 1, m3 = 1;
+	if (xsymbols == lsymbols) {
+		if (lmin)
+			m1 = (s - 1) % lmin, m2 = s % lmin, m3 = (s + 1) % lmin;
+		multiple = !m1 || !m2 || !m3;
+	} else {
+		if (lmax)
+			m1 = (s - 1) % lmax, m2 = s % lmax, m3 = (s + 1) % lmax;
+		multiple = !m1 || !m2 || !m3;
+	}
+	if (direction == L && s > lmin && s > hmin && !multiple)
 		return;
 
 	// find next free entry
@@ -469,8 +479,7 @@ static void align(uint8_t *xsymbols) {
 
 // remove symbols below minimum occurrence
 static void filter(uint16_t samples) {
-	// int min = samples > 100 ? samples / 100 : 1; !!! hier gehen informationen verloren !!! --> 20 kommt nur 1x vor ist aber gültig !!!
-	int min = samples > 100 ? samples / 100 : 0; // TODO was bei Radiohead > 100 samples ???
+	// uint8_t lmin = smallest_symbol(lsymbols), hmin = smallest_symbol(hsymbols);
 
 	if (rfcfg->verbose)
 		dump_tables("symbol tables ");
@@ -479,33 +488,63 @@ static void filter(uint16_t samples) {
 	sort(lsymbols);
 	sort(hsymbols);
 
-	// clean
-	// TODO ist es ein vielfaches vom kleinsten symbol? dann nicht löschen !!! --> modulo max +-1
-	for (int i = 0; i < SYMBOLS; i++) {
-		if (lcounter[i] <= min)
-			lsymbols[i] = 0;
-		if (hcounter[i] <= min)
-			hsymbols[i] = 0;
-	}
-
 	// condense
 	condense(lsymbols);
 	condense(hsymbols);
 
-	if (rfcfg->verbose)
-		dump_tables("after filter  ");
-
-	// melt
+	// align
 	align(lsymbols);
 	align(hsymbols);
 
 	if (rfcfg->verbose)
-		dump_tables("after align   ");
+		dump_tables("after filter  ");
 }
 
-static void melt(uint16_t start, uint16_t stop) {
-	if (rfcfg->verbose)
-		printf("DECODER melting ");
+// move the stream to the right without gaps between
+static void melt_condense(uint16_t start, uint16_t stop) {
+	uint16_t p, pgap;
+
+	int gaps;
+	do {
+		gaps = 0;
+		p = stop + 1;
+		while (--p != start) {
+
+			if (lstream[p] && hstream[p])
+				continue;
+
+			// close this gap
+			pgap = p + 1;
+			while (--pgap != start) {
+				lstream[pgap] = lstream[pgap - 1];
+				hstream[pgap] = hstream[pgap - 1];
+			}
+
+			// create a gap at the beginning
+			lstream[start] = 0;
+			hstream[start] = 0;
+			gaps = 1;
+			start++;
+			break;
+		}
+	} while (gaps);
+}
+
+// melt small spikes (L0, L1, ...) into next L symbol
+static void melt(uint16_t start, uint16_t stop, uint8_t size) {
+	uint16_t l, h, p = start - 1;
+
+	while (p++ != stop) {
+		l = lstream[p];
+		h = hstream[p];
+
+		// melt and create a gap
+		if (l <= size) {
+			lstream[p + 1] += l + h;
+			lstream[p] = 0;
+			hstream[p] = 0;
+		}
+	}
 }
 
 // soft ironing stream up to minimum symbol distance
@@ -514,7 +553,7 @@ static void iron(uint8_t *xstream, uint16_t start, uint16_t stop) {
 	uint8_t s, m, *xsymbols = select_symbols(xstream);
 	uint8_t dmin = symbol_distance(xsymbols);
 
-	for (int i = 0; i < dmin; i++) {
+	for (int i = 0; i <= dmin; i++) {
 
 		if (rfcfg->verbose)
 			printf("DECODER %s ironing d=%d ", xstream == lstream ? "L" : "H", i);
@@ -595,7 +634,7 @@ static void hammer(uint16_t start, uint16_t stop) {
 }
 
 static int tune(uint16_t pos, const char direction) {
-	uint16_t e = 0;
+	int e = 0;
 	uint8_t l, h, ll, hl, lh, hh;
 
 	// smallest + biggest symbols
@@ -606,17 +645,11 @@ static int tune(uint16_t pos, const char direction) {
 	h = hstream[pos];
 
 	if (!l && !h)
-		e = UINT8_MAX; // error or dead stream
+		e = -1; // error or dead stream
 
-	// border hard right hit -> EOT
-	if (direction == R)
-		if (l == UINT8_MAX || h == UINT8_MAX)
-			e = UINT8_MAX;
-
-	// bigger than biggest on the left is not allowed
-	if (direction == L)
-		if (l > (lmax + 5) || h > (hmax + 5))
-			e = UINT8_MAX;
+	// bigger than biggest is not allowed
+	if (l > (lmax + 5) || h > (hmax + 5))
+		e = UINT8_MAX;
 
 	// allow more distance to be fault tolerant on a single position
 	ll = valid(lsymbols, l, 5);
@@ -651,6 +684,9 @@ static uint16_t probe_left(uint16_t start) {
 	// to the right we already collected symbols - use them as error indicator
 	uint8_t lmin = smallest_symbol(lsymbols), hmin = smallest_symbol(hsymbols);
 	uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
+	uint16_t ex = 5 * (lmin + hmin);
+
+	printf("DECODER probe ◄         L{%d,%d}    H{%d,%d}  Ex = %d\n", lmin, lmax, hmin, hmax, ex);
 
 	int e = 0; // floating error counter
 	while (p-- != streampointer + 1) {
@@ -694,7 +730,7 @@ static uint16_t probe_left(uint16_t start) {
 		printf("DECODER probe ◄%05d   %3d(%2d) L   %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
 
 		// tolerate sampling errors, but too much -> jump out
-		if (e > 5 * (lmin + hmin))
+		if (e > ex)
 			break;
 	}
 	return p;
@@ -709,13 +745,13 @@ static uint16_t probe_right(uint16_t start, uint16_t stop) {
 	hmin = hstream[p];
 	learn(hsymbols, hmin, R);
 
-	// find the smallest L sample and learn them - also her we start expanding to right
+	// find the smallest L sample and learn them - also here we start expanding to right
 	p = smallest_sample(lstream, start, stop);
 	lmin = lstream[p];
 	learn(lsymbols, lmin, R);
 
 	if (rfcfg->verbose)
-		printf("DECODER initially learned smallest symbols   L%d   H%d\n", lmin, hmin);
+		printf("DECODER probe ►  L{%d,?}    H{%d,?}\n", lmin, hmin);
 
 	p--;
 	int e = 0; // floating error counter
@@ -790,10 +826,24 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 		return stop;
 
 	if (rfcfg->verbose)
-		printf("DECODER probe window [%05u:%05u] %u samples\n", estart, estop, dist);
+		printf("DECODER probe window  [%05u:%05u] %u samples\n", estart, estop, dist);
 
 	// filter, sort and melt the symbol tables
 	filter(dist);
+
+	// melt small spikes up to L2 into next L symbol - if we do it initially on lsamples/hsamples its hard to do the probe_left
+	melt(estart, estop, 2);
+	melt_condense(estart, estop);
+	while (!lstream[estart] && !hstream[estart] && estart != estop) // adjust start
+		estart++;
+
+	// this is again crap
+	dist = distance(estart, estop);
+	if (dist < 16)
+		return stop;
+
+	if (rfcfg->verbose)
+		printf("DECODER after melting [%05u:%05u] %u samples\n", estart, estop, dist);
 
 	// fine tune right edge of window
 	estop -= 8;
@@ -810,11 +860,14 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 	if (dist < 16)
 		return stop;
 
-	if (rfcfg->verbose)
-		printf("DECODER tuned window [%05u:%05u] %u samples\n", estart, estop, dist);
+	// EOT - the receiver is adjusting it's sensitivity back to noise level
+	// estimate signal strength based on time to next l+h samples
+	uint8_t ln = lstream[estop], hn = rfcfg->sample_on_0 ? hstream[estop + 1] : hstream[estop];
+	uint16_t lsn = lsamples[estop], hsn = rfcfg->sample_on_0 ? hsamples[estop + 1] : hsamples[estop];
+	uint32_t strenth = (lsn + hsn) * 100 / (UINT16_MAX * 2);
 
-	// melt short spikes (H0, H1) to the next position
-	melt(estart, estop);
+	if (rfcfg->verbose)
+		printf("DECODER tuned  [%05u:%05u] %u samples, signal %u%% estimated from L+1 %d(%u) H+1 %d(%u) after EOT\n", estart, estop, dist, strenth, ln, lsn, hn, hsn);
 
 	// symbol soft error correction
 	iron(lstream, estart, estop);
@@ -822,14 +875,6 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 
 	// symbol hard error correction
 	hammer(estart, estop);
-
-	// EOT - the receiver is adjusting it's sensitivity back to noise level
-	// estimate signal strength based on time to next sample
-	uint8_t lnext = lstream[estop], hnext = rfcfg->sample_on_0 ? hstream[estop + 1] : hstream[estop];
-	uint16_t lsnext = lsamples[estop], hsnext = rfcfg->sample_on_0 ? hsamples[estop + 1] : hsamples[estop];
-	uint32_t strength = (lsnext + hsnext) * 100 / (UINT16_MAX * 2);
-	if (rfcfg->verbose)
-		printf("DECODER signal strength   %u%%   estimated from EOT   L+1 %d(%u)   H+1 %d(%u)\n", strength, lnext, lsnext, hnext, hsnext);
 
 	// consume this stream window
 	eat(estart, estop);
@@ -848,8 +893,6 @@ static void scale(uint16_t start, uint16_t stop) {
 	while (p++ != stop) {
 		sl = lsamples[p];
 		sh = hsamples[p];
-
-		// TODO noise ?
 
 		// too big - ? multiple signals at same time, receiver sensitivity was overridden by the stronger
 		if (sl > smax)
@@ -960,7 +1003,7 @@ void* stream_decoder(void *arg) {
 		select_hstream();
 
 	// decoder main loop: pause, then decode block
-	uint16_t p1 = 0, p2 = 0;
+	uint16_t start = 0, stop = 0;
 	while (1) {
 		msleep(rfcfg->decoder_delay);
 
@@ -969,40 +1012,40 @@ void* stream_decoder(void *arg) {
 			msleep(100);
 
 		// this is the block we have to analyze in this round
-		p2 = streampointer;
-		uint16_t block = distance(p1, p2);
+		stop = streampointer;
 
 		if (rfcfg->verbose)
-			printf("DECODER analyzing [%05u:%05u] %u samples\n", p1, p2, block);
+			printf("DECODER analyzing [%05u:%05u] %u samples\n", start, stop, distance(start, stop));
 
 		// shrink samples to max 256 symbols
-		scale(p1, p2);
+		scale(start, stop);
 
 		// pattern sniffer loop
+		uint16_t block = distance(start, stop);
 		while (block > 8) {
 
 			// catch pattern by jumping 4-block-wise
-			if (!sniff(p1)) {
-				p1 = forw(p1, 4);
+			if (!sniff(start)) {
+				start = forw(start, 4);
 				block -= 4;
 				continue;
 			}
 
-			uint16_t start = p1;
+			uint16_t p1 = start;
 
 			// jump forward till no match
-			while (sniff(p1 + 4) && block > 4) {
-				p1 = forw(p1, 4);
+			while (sniff(start + 4) && block > 4) {
+				start = forw(start, 4);
 				block -= 4;
 			}
 
-			uint16_t stop = p1;
+			uint16_t p2 = start;
 
 			// detailed symbol analyzing
-			if (start != stop)
-				p1 = probe(start, stop);
+			if (p1 != p2)
+				start = probe(p1, p2);
 
-			block = distance(++p1, p2);
+			block = distance(++start, stop);
 		}
 	}
 	return (void*) 0;
