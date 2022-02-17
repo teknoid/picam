@@ -32,6 +32,11 @@ static int receiving_counter = 0;
 extern rfsniffer_config_t *rfcfg;
 
 // print in green
+static void red() {
+	printf("\x1b[31m");
+}
+
+// print in green
 static void green() {
 	printf("\x1b[32m");
 }
@@ -599,8 +604,10 @@ static void hammer(uint16_t start, uint16_t stop) {
 	uint16_t p = start - 1;
 	uint8_t l, lv, h, hv;
 
-	if (rfcfg->verbose)
+	if (rfcfg->verbose) {
 		printf("DECODER invalid symbols ");
+		red();
+	}
 
 	int invalid = 0;
 	while (p++ != stop - 1) {
@@ -627,6 +634,7 @@ static void hammer(uint16_t start, uint16_t stop) {
 	}
 
 	if (rfcfg->verbose) {
+		attroff();
 		printf("\n");
 		if (!invalid)
 			clearline();
@@ -648,14 +656,14 @@ static int tune(uint16_t pos, const char direction) {
 		e = -1; // error or dead stream
 
 	// bigger than biggest is not allowed
-	if (l > (lmax + 5) || h > (hmax + 5))
+	if (l > (lmax + 3) || h > (hmax + 3))
 		e = UINT8_MAX;
 
 	// allow more distance to be fault tolerant on a single position
-	ll = valid(lsymbols, l, 5);
-	hl = valid(hsymbols, l, 5);
-	lh = valid(lsymbols, h, 5);
-	hh = valid(hsymbols, h, 5);
+	ll = valid(lsymbols, l, 3);
+	hl = valid(hsymbols, l, 3);
+	lh = valid(lsymbols, h, 3);
+	hh = valid(hsymbols, h, 3);
 
 	// l not valid in l/h
 	if (!ll && !hl)
@@ -686,7 +694,7 @@ static uint16_t probe_left(uint16_t start) {
 	uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
 	uint16_t ex = 5 * (lmin + hmin);
 
-	printf("DECODER probe ◄         L{%d,%d}    H{%d,%d}  Ex = %d\n", lmin, lmax, hmin, hmax, ex);
+	printf("DECODER probe  ◄        {%2d,%2d} L   {%2d,%2d} H   %3d Ex\n", lmin, lmax, hmin, hmax, ex);
 
 	int e = 0; // floating error counter
 	while (p-- != streampointer + 1) {
@@ -697,14 +705,10 @@ static uint16_t probe_left(uint16_t start) {
 			break; // dead stream
 
 		// biggest on left - might be a sync, but bigger are not allowed
-		if (l > (lmax + hmax) || h > (lmax + hmax))
-			e = UINT8_MAX;
-
-		// take the next left as error - if its valid then error is healed on next position
-		if (!l)
-			e += lstream[p - 1];
-		if (!h)
-			e += hstream[p - 1];
+		if (l > (lmax + hmax) || h > (lmax + hmax)) {
+			printf("DECODER probe |◄%05d   %3d(%2d) L   %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
+			break;
+		}
 
 		// small distance because we want to learn
 		lv = valid_hit(lsymbols, l, 1);
@@ -727,11 +731,13 @@ static uint16_t probe_left(uint16_t start) {
 		if (e < 0)
 			e = 0;
 
-		printf("DECODER probe ◄%05d   %3d(%2d) L   %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
-
 		// tolerate sampling errors, but too much -> jump out
-		if (e > ex)
+		if (e > ex) {
+			printf("DECODER probe |◄%05d   %3d(%2d) L   %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
 			break;
+		}
+
+		printf("DECODER probe  ◄%05d   %3d(%2d) L   %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
 	}
 	return p;
 }
@@ -751,7 +757,7 @@ static uint16_t probe_right(uint16_t start, uint16_t stop) {
 	learn(lsymbols, lmin, R);
 
 	if (rfcfg->verbose)
-		printf("DECODER probe ►  L{%d,?}    H{%d,?}\n", lmin, hmin);
+		printf("DECODER probe        ►   {%2d,?} L    {%2d,?} H\n", lmin, hmin);
 
 	p--;
 	int e = 0; // floating error counter
@@ -761,12 +767,6 @@ static uint16_t probe_right(uint16_t start, uint16_t stop) {
 
 		if (!l && !h)
 			break; // dead stream
-
-		// take the next right as error - if its valid then error is healed on next position
-		if (!l)
-			e += lstream[p + 1];
-		if (!h)
-			e += hstream[p + 1];
 
 		// small distance because we want to learn
 		lv = valid_hit(lsymbols, l, 1);
@@ -789,10 +789,10 @@ static uint16_t probe_right(uint16_t start, uint16_t stop) {
 		if (e < 0)
 			e = 0;
 
-		printf("DECODER probe  %05d►  %3d(%2d) L   %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
+		printf("DECODER probe   %05d►  %3d(%2d) L   %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
 
 		// reached EOT
-		if (e >= UINT8_MAX)
+		if (e >= UINT8_MAX - 10)
 			break;
 	}
 	return p;
