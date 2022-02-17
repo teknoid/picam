@@ -368,9 +368,9 @@ static void learn(uint8_t *xsymbols, uint8_t s, const char direction) {
 	if (!s || s == 1 || s == UINT8_MAX)
 		return;
 
-	// right: symbols only allowed to grow, not shrink, max grow is biggest * 2
+	// right: symbols only allowed to grow, not shrink but also not bigger than 2x biggest L+H
 	uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
-	if (direction == R && s < lmax && s < hmax && (s > lmax * 2 + 5))
+	if (direction == R && lmax && hmax && s > (lmax + hmax) * 2)
 		return;
 
 	// left: symbols only allowed to shrink, not grow, except multiples of the smallest
@@ -679,7 +679,7 @@ static int tune(uint16_t pos, const char direction) {
 			printf("◄%05u  ", pos);
 		if (direction == R)
 			printf(" %05u► ", pos);
-		printf("   L %3d(%2d,%2d)   H %3d(%2d,%2d)   E %d\n", l, ll, hl, h, lh, hh, e);
+		printf("%3d(%2d,%2d) L   %3d(%2d,%2d) H   %3d E\n", l, ll, hl, h, lh, hh, e);
 	}
 
 	return !e;
@@ -694,7 +694,7 @@ static uint16_t probe_left(uint16_t start) {
 	uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
 	uint16_t ex = 5 * (lmin + hmin);
 
-	printf("DECODER probe  ◄        {%2d,%2d} L   {%2d,%2d} H   %3d Ex\n", lmin, lmax, hmin, hmax, ex);
+	printf("DECODER probe  ◄        {%2d,%2d} L      {%2d,%2d} H   %3d Ex\n", lmin, lmax, hmin, hmax, ex);
 
 	int e = 0; // floating error counter
 	while (p-- != streampointer + 1) {
@@ -706,7 +706,7 @@ static uint16_t probe_left(uint16_t start) {
 
 		// biggest on left - might be a sync, but bigger are not allowed
 		if (l > (lmax + hmax) || h > (lmax + hmax)) {
-			printf("DECODER probe |◄%05d   %3d(%2d) L   %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
+			printf("DECODER probe |◄%05d   %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
 			break;
 		}
 
@@ -733,11 +733,11 @@ static uint16_t probe_left(uint16_t start) {
 
 		// tolerate sampling errors, but too much -> jump out
 		if (e > ex) {
-			printf("DECODER probe |◄%05d   %3d(%2d) L   %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
+			printf("DECODER probe |◄%05d   %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
 			break;
 		}
 
-		printf("DECODER probe  ◄%05d   %3d(%2d) L   %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
+		printf("DECODER probe  ◄%05d   %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
 	}
 	return p;
 }
@@ -757,7 +757,7 @@ static uint16_t probe_right(uint16_t start, uint16_t stop) {
 	learn(lsymbols, lmin, R);
 
 	if (rfcfg->verbose)
-		printf("DECODER probe        ►   {%2d,?} L    {%2d,?} H\n", lmin, hmin);
+		printf("DECODER probe        ►   {%2d,?} L       {%2d,?} H\n", lmin, hmin);
 
 	p--;
 	int e = 0; // floating error counter
@@ -789,11 +789,13 @@ static uint16_t probe_right(uint16_t start, uint16_t stop) {
 		if (e < 0)
 			e = 0;
 
-		printf("DECODER probe   %05d►  %3d(%2d) L   %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
-
 		// reached EOT
-		if (e >= UINT8_MAX - 10)
+		if (e >= UINT8_MAX - 10) {
+			printf("DECODER probe   %05d►| %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
 			break;
+		}
+
+		printf("DECODER probe   %05d►  %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
 	}
 	return p;
 }
