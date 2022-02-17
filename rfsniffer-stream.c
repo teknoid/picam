@@ -192,6 +192,20 @@ static uint16_t smallest_sample(uint8_t *xstream, uint16_t start, uint16_t stop)
 	return pmin;
 }
 
+// find the biggest sample in given window and return it's position
+static uint16_t biggest_sample(uint8_t *xstream, uint16_t start, uint16_t stop) {
+	uint16_t pmax = start - 1, p = start - 1;
+	uint8_t s, max = 0;
+	while (p++ != stop) {
+		s = xstream[p];
+		if (s && (s > max)) {
+			max = s;
+			pmax = p;
+		}
+	}
+	return pmax;
+}
+
 static void clear_tables() {
 	memset(lsymbols, 0, SYMBOLS * sizeof(uint8_t));
 	memset(lcounter, 0, SYMBOLS * sizeof(uint16_t));
@@ -368,8 +382,9 @@ static void learn(uint8_t *xsymbols, uint8_t s, const char direction) {
 	if (!s || s == 1 || s == UINT8_MAX)
 		return;
 
-	// right: symbols only allowed to grow, not shrink but also not bigger than 2x biggest L+H
+	// right: symbols only allowed to grow, not shrink, also learn big SYNC pulses
 	uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
+//	if (direction == R && s > UINT8_MAX / 2)
 	if (direction == R && lmax && hmax && s > (lmax + hmax) * 2)
 		return;
 
@@ -483,9 +498,7 @@ static void align(uint8_t *xsymbols) {
 }
 
 // remove symbols below minimum occurrence
-static void filter(uint16_t samples) {
-	// uint8_t lmin = smallest_symbol(lsymbols), hmin = smallest_symbol(hsymbols);
-
+static void filter() {
 	if (rfcfg->verbose)
 		dump_tables("symbol tables ");
 
@@ -744,20 +757,32 @@ static uint16_t probe_left(uint16_t start) {
 
 static uint16_t probe_right(uint16_t start, uint16_t stop) {
 	uint16_t p;
-	uint8_t l, lv, h, hv, lmin, hmin;
+	uint8_t l, lv, h, hv, lmin, hmin, lmax, hmax;
 
-	// find the smallest H sample and learn it
+	// find the biggest/smallest H sample and learn it
+	p = biggest_sample(hstream, start, stop);
+	hmax = hstream[p];
 	p = smallest_sample(hstream, start, stop);
 	hmin = hstream[p];
-	learn(hsymbols, hmin, R);
 
 	// find the smallest L sample and learn them - also here we start expanding to right
+	p = biggest_sample(lstream, start, stop);
+	lmax = lstream[p];
 	p = smallest_sample(lstream, start, stop);
 	lmin = lstream[p];
-	learn(lsymbols, lmin, R);
+
+	// initially learn them
+	lsymbols[0] = lmin;
+	lcounter[0] = 1;
+	hsymbols[0] = hmin;
+	hcounter[0] = 1;
+	lsymbols[1] = lmax;
+	lcounter[1] = 1;
+	hsymbols[1] = hmax;
+	hcounter[1] = 1;
 
 	if (rfcfg->verbose)
-		printf("DECODER probe        ►   {%2d,?} L       {%2d,?} H\n", lmin, hmin);
+		printf("DECODER probe        ►  {%2d,%2d} L      {%2d,%2d} H\n", lmin, lmax, hmin, hmax);
 
 	p--;
 	int e = 0; // floating error counter
@@ -824,14 +849,14 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 
 	// this is crap
 	dist = distance(estart, estop);
-	if (dist < 16)
+	if (dist < 16 || dist > 2048)
 		return stop;
 
 	if (rfcfg->verbose)
 		printf("DECODER probe window  [%05u:%05u] %u samples\n", estart, estop, dist);
 
-	// filter, sort and melt the symbol tables
-	filter(dist);
+	// filter, sort and align symbol tables
+	filter();
 
 	// melt small spikes up to L2 into next L symbol - if we do it initially on lsamples/hsamples its hard to do the probe_left
 	melt(estart, estop, 2);
@@ -841,7 +866,7 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 
 	// this is again crap
 	dist = distance(estart, estop);
-	if (dist < 16)
+	if (dist < 16 || dist > 2048)
 		return stop;
 
 	if (rfcfg->verbose)
@@ -859,7 +884,7 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 
 	// this is again crap
 	dist = distance(estart, estop);
-	if (dist < 16)
+	if (dist < 16 || dist > 2048)
 		return stop;
 
 	// EOT - the receiver is adjusting it's sensitivity back to noise level
