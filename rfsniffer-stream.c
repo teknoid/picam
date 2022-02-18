@@ -99,9 +99,9 @@ static uint16_t forw(uint16_t start, uint16_t positions) {
 // calculate the distance between two stream positions
 static uint16_t distance(uint16_t start, uint16_t stop) {
 	if (stop < start)
-		return (UINT16_MAX - start) + stop;
+		return (UINT16_MAX - start) + stop + 1;
 	else
-		return stop - start;
+		return stop - start + 1;
 }
 
 // clears both streams between the positions
@@ -171,12 +171,12 @@ static void dump_stream(uint8_t *xstream, uint16_t start, uint16_t stopp, int ov
 	}
 }
 
-static void dump(uint16_t start, uint16_t stop) {
+static void dump(uint16_t start, uint16_t stop, int overhead) {
 	printf("DECODER dump [%05u:%05u] %u samples,", start, stop, distance(start, stop));
 	printf(" start pattern [%d, %d, %d, %d],", stream[start], stream[start + 1], stream[start + 2], stream[start + 3]);
 	printf(" stop  pattern [%d, %d, %d, %d]\n", stream[stop - 3], stream[stop - 2], stream[stop - 1], stream[stop]);
-	dump_stream(hstream, start, stop, 16);
-	dump_stream(lstream, start, stop, 16);
+	dump_stream(hstream, start, stop, overhead);
+	dump_stream(lstream, start, stop, overhead);
 }
 
 // calculates the size of symbol table
@@ -270,21 +270,15 @@ static void dump_tables(const char *message) {
 //
 // this may require a dummy bit at end of transmission
 //
-static uint64_t decode_low(uint16_t pos, uint8_t bits, uint16_t divider) {
+static uint64_t decode_low(uint16_t pos, int bits) {
 	uint64_t code = 0;
-	uint8_t l, h;
+	uint8_t l, lmin = lsymbols[0] < lsymbols[1] ? lsymbols[0] : lsymbols[1];
+
 	for (int i = 0; i < bits; i++) {
-		l = lstream[pos];
-		h = hstream[pos];
-
-		if (!l && !h)
-			return 0;
-
-		if (l > divider)
-			code++;
-
 		code <<= 1;
-		pos++;
+		l = lstream[pos++];
+		if (l != UINT8_MAX && l > lmin)
+			code++;
 	}
 	return code;
 }
@@ -313,16 +307,76 @@ static uint64_t decode_high(uint16_t pos, uint8_t bits, uint16_t divider) {
 	return code;
 }
 
+static uint16_t find(uint8_t *xstream, uint16_t start, uint16_t stop, uint8_t s) {
+	start--;
+	while (start++ != stop)
+		if (xstream[start] == s)
+			return start;
+	return stop;
+}
+
+// find the SYNC symbol - min 3 repeats with identical distances > 8
+static void find_sync(uint8_t *xstream, uint16_t start, uint16_t stop, uint8_t *sync, uint8_t *dist) {
+	uint16_t p, positions[SYMBOLS];
+	uint8_t s, *xsymbols = select_symbols(xstream);
+
+	memset(positions, 0, SYMBOLS * sizeof(uint16_t));
+	for (int i = 0; i < SYMBOLS; i++) {
+		s = xsymbols[i];
+		if (!s)
+			break;
+
+		int j = 0;
+		p = start;
+		do {
+			p = find(xstream, p, stop, s);
+			positions[j++] = p;
+		} while (p++ != stop && j < SYMBOLS);
+
+		int d0 = distance(positions[0], positions[1]);
+		int d1 = distance(positions[1], positions[2]);
+		int d2 = distance(positions[2], positions[3]);
+
+		if (d0 > 8 && d0 == d1 && d1 == d2) {
+			*sync = s;
+			*dist = d0 - 2;
+			return;
+		}
+	}
+}
+
 // consume the signal
 static void eat(uint16_t start, uint16_t stop) {
-	select_hstream();
-	if (rfcfg->verbose)
-		dump(start, stop);
+	uint64_t code;
+	uint16_t p = 0, count = 0;
+	uint8_t sync = 0, dist = 0;
 
-	uint64_t lcode = decode_low(stop - 64, 64, 15);
-	uint64_t hcode = decode_high(stop - 64, 64, 6);
 	if (rfcfg->verbose)
-		printf("DECODER probe_low 0x%016llx == %s probe_high 0x%016llx == %s\n", lcode, printbits64(lcode, SPACEMASK64), hcode, printbits64(hcode, SPACEMASK64));
+		dump(start, stop, 16);
+
+	find_sync(lstream, start, stop, &sync, &dist);
+	if (!sync)
+		return;
+
+	if (rfcfg->verbose)
+		printf("DECODER found SYNC L%2d code length %2d bits\n", sync, dist);
+
+	p = start;
+	do {
+		p = find(lstream, p, stop, sync);
+		// the code before the first sync
+		if (!count++) {
+			dump(p - dist, p - 1, 2);
+			code = decode_low(p - dist, dist);
+			printf("%s\n", printbits64(code, 0x1011001101));
+			matrix_store(P_NEXUS, code);
+		}
+		// the code after the sync
+		dump(p + 1, p + dist, 2);
+		code = decode_low(p + 1, dist);
+		printf("%s\n", printbits64(code, 0x1011001101));
+		matrix_store(P_NEXUS, code);
+	} while (p++ != stop);
 }
 
 // determine minimum symbol distance
@@ -355,6 +409,10 @@ static uint8_t valid(uint8_t *xsymbols, uint8_t s, uint8_t d) {
 		if (s == t)
 			return t;
 	}
+
+	if (!d)
+		return 0;
+
 	// 2nd round: find the best match with minimal distance
 	for (int i = 0; i < SYMBOLS; i++) {
 		t = xsymbols[i];
@@ -386,6 +444,10 @@ static uint8_t valid_hit(uint8_t *xsymbols, uint8_t s, uint8_t d) {
 			return t;
 		}
 	}
+
+	if (!d)
+		return 0;
+
 	for (int i = 0; i < SYMBOLS; i++) {
 		t = xsymbols[i];
 		if (!t)
@@ -576,16 +638,16 @@ static void melt_condense(uint16_t start, uint16_t stop) {
 }
 
 // melt small spikes (L0, L1, ...) into next L symbol
-static void melt(uint16_t start, uint16_t stop, uint8_t size) {
-	uint16_t l, h, p = start - 1;
-
+static void melt(uint16_t start, uint16_t stop) {
+	uint16_t p = start - 1;
+	uint8_t d, dmin = lsymbols[0] < lsymbols[1] ? lsymbols[0] : lsymbols[1];
+	if (dmin)
+		dmin--;
 	while (p++ != stop) {
-		l = lstream[p];
-		h = hstream[p];
-
 		// melt and create a gap
-		if (l <= size) {
-			lstream[p + 1] += l + h;
+		d = lstream[p] + hstream[p];
+		if (d < dmin) {
+			lstream[p + 1] += d;
 			lstream[p] = 0;
 			hstream[p] = 0;
 		}
@@ -750,9 +812,9 @@ static uint16_t probe_left(uint16_t start) {
 			break;
 		}
 
-		// small distance because we want to learn
-		lv = valid_hit(lsymbols, l, 1);
-		hv = valid_hit(hsymbols, h, 1);
+		// null distance because we want to learn
+		lv = valid_hit(lsymbols, l, 0);
+		hv = valid_hit(hsymbols, h, 0);
 
 		if (lv)
 			e -= l;
@@ -820,9 +882,9 @@ static uint16_t probe_right(uint16_t start, uint16_t stop) {
 		if (!l && !h)
 			break; // dead stream
 
-		// small distance because we want to learn
-		lv = valid_hit(lsymbols, l, 1);
-		hv = valid_hit(hsymbols, h, 1);
+		// null distance because we want to learn
+		lv = valid_hit(lsymbols, l, 0);
+		hv = valid_hit(hsymbols, h, 0);
 
 		if (lv)
 			e -= l;
@@ -885,8 +947,8 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 	// filter, sort and align symbol tables
 	filter();
 
-	// melt small spikes up to L2 into next L symbol - if we do it initially on lsamples/hsamples its hard to do the probe_left
-	melt(estart, estop, 2);
+	// melt small L+H spikes into next L - if we do it initially on lsamples/hsamples its hard to do the probe_left
+	melt(estart, estop);
 	melt_condense(estart, estop);
 	while (!lstream[estart] && !hstream[estart] && estart != estop) // adjust start
 		estart++;
@@ -1103,6 +1165,8 @@ void* stream_decoder(void *arg) {
 
 			block = distance(++start, stop);
 		}
+
+		matrix_decode();
 	}
 	return (void*) 0;
 }

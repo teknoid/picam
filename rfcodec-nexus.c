@@ -21,7 +21,7 @@ void nexus_decode(uint8_t protocol, uint64_t raw, uint8_t repeat) {
 	// we want at least 3 identical messages
 	if (1 <= repeat && repeat < 3) {
 		if (rfcfg->verbose)
-			printf("NEXUS {%d} too few repeats, discard message 0x%08llx = %s\n", repeat, raw, printbits64(raw, 0x1011001101));
+			printf("NEXUS {%d} too few repeats, discard message 0x%016llx = %s\n", repeat, raw, printbits64(raw, 0x1011001101));
 		return;
 	}
 
