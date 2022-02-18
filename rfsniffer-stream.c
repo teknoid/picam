@@ -360,21 +360,20 @@ static uint8_t symbol_distance(uint8_t *xsymbols) {
 }
 
 // returns the best matching symbol for given distance
-static uint8_t valid(uint8_t *xsymbols, uint8_t s, uint8_t d) {
+static uint8_t match(uint8_t *xsymbols, uint8_t s, uint8_t d) {
 	uint8_t t, td, tdmin = UINT8_MAX, tmin = 0;
+
 	if (!s)
 		return 0;
+
 	// 1st round: try to find equals match
 	for (int i = 0; i < SYMBOLS; i++) {
 		t = xsymbols[i];
-		if (!t)
-			break; // table end
 		if (s == t)
 			return t;
+		if (!t)
+			break; // table end
 	}
-
-	if (!d)
-		return 0;
 
 	// 2nd round: find the best match with minimal distance
 	for (int i = 0; i < SYMBOLS; i++) {
@@ -392,39 +391,23 @@ static uint8_t valid(uint8_t *xsymbols, uint8_t s, uint8_t d) {
 	return tmin;
 }
 
-// same as valid() but additionally increments the hit counter of the matching symbol
-static uint8_t valid_hit(uint8_t *xsymbols, uint8_t s, uint8_t d) {
+// returns the symbol if it's in table, else 0
+static uint8_t valid(uint8_t *xsymbols, uint8_t s) {
 	uint16_t *xcounter = select_counter(xsymbols);
-	uint8_t t, td, tdmin = UINT8_MAX, tmin = 0;
+
 	if (!s)
 		return 0;
+
 	for (int i = 0; i < SYMBOLS; i++) {
-		t = xsymbols[i];
-		if (!t)
-			break; // table end
+		uint8_t t = xsymbols[i];
 		if (s == t) {
 			xcounter[i]++;
 			return t;
 		}
-	}
-
-	if (!d)
-		return 0;
-
-	for (int i = 0; i < SYMBOLS; i++) {
-		t = xsymbols[i];
 		if (!t)
 			break; // table end
-		td = t > s ? t - s : s - t;
-		if (td > d)
-			continue;
-		if (td < tdmin) {
-			tdmin = td;
-			tmin = t;
-			xcounter[i]++;
-		}
 	}
-	return tmin;
+	return 0;
 }
 
 static void learn(uint8_t *xsymbols, uint8_t s, const char direction) {
@@ -636,7 +619,7 @@ static void iron(uint8_t *xstream, uint16_t start, uint16_t stop) {
 			if (!s)
 				continue;
 
-			m = valid(xsymbols, s, i);
+			m = match(xsymbols, s, i);
 			if (!m)
 				continue;
 			if (m != s) {
@@ -679,8 +662,8 @@ static void hammer(uint16_t start, uint16_t stop) {
 		l = lstream[p];
 		h = hstream[p];
 
-		lv = valid_hit(lsymbols, l, 0);
-		hv = valid_hit(hsymbols, h, 0);
+		lv = valid(lsymbols, l);
+		hv = valid(hsymbols, h);
 
 		if (!lv) {
 			invalid++;
@@ -706,48 +689,10 @@ static void hammer(uint16_t start, uint16_t stop) {
 	}
 }
 
-// dumb 4-block symbol pattern matching - return the most smallest matching symbol
-static int sniff(uint8_t *xstream, uint16_t start) {
-	uint8_t p0 = xstream[start], p1 = xstream[start + 1], p2 = xstream[start + 2], p3 = xstream[start + 3];
-
-	// contains zeros
-	if (!p0 || !p1 || !p2 || !p3)
-		return 0;
-
-	// [3 3 3 3] full identical
-	if (p0 == p1 && p1 == p2 && p2 == p3)
-		return p0;
-
-	// [9 9 19 19] [9 19 19 9] symmetric identical values
-	if (p0 == p1 && p2 == p3)
-		return p0 < p2 ? p0 : p2;
-	if (p0 == p3 && p1 == p2)
-		return p0 < p1 ? p0 : p1;
-
-	// [5 10 5 10] alternating identical values
-	if (p0 == p2 && p1 == p3)
-		return p0 < p1 ? p0 : p1;
-
-	// [19 19 19 9] 3 identical values
-	if (p0 == p1 && p1 == p2)
-		return p0 < p3 ? p0 : p3;
-	if (p0 == p1 && p1 == p3)
-		return p0 < p2 ? p0 : p2;
-	if (p0 == p2 && p2 == p3)
-		return p0 < p1 ? p0 : p1;
-	if (p1 == p2 && p2 == p3)
-		return p0 < p1 ? p0 : p1;
-
-	return 0;
-}
-
-static int tune(uint16_t pos, const char direction) {
-	int e = 0;
+static int tune(uint16_t pos, int tolerance, const char direction) {
 	uint8_t l, h, ll, hl, lh, hh;
-
-	// smallest + biggest symbols
-	// uint8_t lmin = smallest_symbol(lsymbols), hmin = smallest_symbol(hsymbols);
 	uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
+	int e = 0;
 
 	l = lstream[pos];
 	h = hstream[pos];
@@ -756,14 +701,14 @@ static int tune(uint16_t pos, const char direction) {
 		e = -1; // error or dead stream
 
 	// bigger than biggest is not allowed
-	if (l > (lmax + 3) || h > (hmax + 3))
+	if (l > (lmax + tolerance) || h > (hmax + tolerance))
 		e = UINT8_MAX;
 
 	// allow more distance to be fault tolerant on a single position
-	ll = valid(lsymbols, l, 3);
-	hl = valid(hsymbols, l, 3);
-	lh = valid(lsymbols, h, 3);
-	hh = valid(hsymbols, h, 3);
+	ll = match(lsymbols, l, tolerance);
+	hl = match(hsymbols, l, tolerance);
+	lh = match(lsymbols, h, tolerance);
+	hh = match(hsymbols, h, tolerance);
 
 	// l not valid in l/h
 	if (!ll && !hl)
@@ -810,9 +755,8 @@ static uint16_t probe_left(uint16_t start) {
 			break;
 		}
 
-		// null distance because we want to learn
-		lv = valid_hit(lsymbols, l, 0);
-		hv = valid_hit(hsymbols, h, 0);
+		lv = valid(lsymbols, l);
+		hv = valid(hsymbols, h);
 
 		if (lv)
 			e -= l;
@@ -857,9 +801,8 @@ static uint16_t probe_right(uint16_t start, uint16_t stop) {
 		if (!l && !h)
 			break; // dead stream
 
-		// null distance because we want to learn
-		lv = valid_hit(lsymbols, l, 0);
-		hv = valid_hit(hsymbols, h, 0);
+		lv = valid(lsymbols, l);
+		hv = valid(hsymbols, h);
 
 		if (lv)
 			e -= l;
@@ -890,7 +833,7 @@ static uint16_t probe_right(uint16_t start, uint16_t stop) {
 }
 
 // find begin and end of a signal by analyzing symbols
-static uint16_t probe(uint16_t start, uint16_t stop) {
+static uint16_t probe(uint8_t *xstream, uint16_t start, uint16_t stop) {
 	uint16_t estart, estop, dist;
 
 	// this is crap
@@ -907,14 +850,8 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 	if (rfcfg->verbose)
 		printf("DECODER L=low stream, H=high stream, symbol(valid), E=error counter, D=distance to stream head\n");
 
-	// initially learn symbols at the beginning and at the end
-	lsymbols[0] = sniff(lstream, start);
-	hsymbols[0] = sniff(hstream, start);
-	lsymbols[1] = sniff(lstream, stop - 4);
-	hsymbols[1] = sniff(hstream, stop - 4);
-
-	// expand window to right, then left - right is more reliable due to signal goes into noise on left side
-	estop = probe_right(start, stop);
+	// expand window to right - more reliable, then left - signal comes out of noise on that side
+	estop = probe_right(start + 4, stop);
 	estart = probe_left(start);
 
 	// this is crap
@@ -944,13 +881,13 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 
 	// fine tune right edge of window
 	estop -= 8;
-	while (tune(estop, R))
+	while (tune(estop, 3, R))
 		estop++;
 	estop--;
 
 	// fine tune left edge of window
 	estart += 16;
-	while (tune(estart, L))
+	while (tune(estart, 3, L))
 		estart--;
 	estart++;
 
@@ -1012,6 +949,41 @@ static void scale(uint16_t start, uint16_t stop) {
 		lstream[p] = l;
 		hstream[p] = h;
 	}
+}
+
+// dumb 4-block symbol pattern matching - return the most smallest matching symbol
+static int sniff(uint8_t *xstream, uint16_t start) {
+	uint8_t p0 = xstream[start], p1 = xstream[start + 1], p2 = xstream[start + 2], p3 = xstream[start + 3];
+
+	// contains zeros
+	if (!p0 || !p1 || !p2 || !p3)
+		return 0;
+
+	// [3 3 3 3] full identical
+	if (p0 == p1 && p1 == p2 && p2 == p3)
+		return p0;
+
+	// [9 9 19 19] [9 19 19 9] symmetric identical values
+	if (p0 == p1 && p2 == p3)
+		return p0 < p2 ? p0 : p2;
+	if (p0 == p3 && p1 == p2)
+		return p0;
+
+	// [5 10 5 10] alternating identical values
+	if (p0 == p2 && p1 == p3)
+		return p0;
+
+	// [19 19 19 9] 3 identical values
+	if (p0 == p1 && p1 == p2)
+		return p0;
+	if (p0 == p1 && p1 == p3)
+		return p0;
+	if (p0 == p2 && p2 == p3)
+		return p0;
+	if (p1 == p2 && p2 == p3)
+		return p1;
+
+	return 0;
 }
 
 // check the last received pulses - if between 200-5000µs we assume receiving is in progress
@@ -1108,7 +1080,7 @@ void* stream_decoder(void *arg) {
 
 			// detailed symbol analyzing
 			if (p1 != p2)
-				start = probe(p1, p2);
+				start = probe(xstream, p1, p2);
 
 			block = distance(++start, stop);
 		}
