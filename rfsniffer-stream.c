@@ -6,12 +6,11 @@
 #include <pthread.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 
 #include "gpio.h"
 #include "rfsniffer.h"
 #include "utils.h"
-
-#define BLOCKSIZE			64
 
 #define SYMBOLS				32
 
@@ -114,42 +113,70 @@ static void clear_streams(uint16_t start, uint16_t stop) {
 	}
 }
 
-static void dump_stream(uint16_t start, uint16_t stop, int mstart, int mstop) {
-	uint16_t p = start - 1;
+static void dump_stream(uint8_t *xstream, uint16_t start, uint16_t stopp, int overhead) {
+	uint16_t p;
+	int cols = 80;
 
-	// the opposite stream
-	uint8_t *xstream = stream == lstream ? hstream : lstream;
+#ifdef TIOCGSIZE
+    struct ttysize ts;
+    ioctl(STDIN_FILENO, TIOCGSIZE, &ts);
+    cols = ts.ts_cols;
+#elif defined(TIOCGWINSZ)
+	struct winsize ts;
+	ioctl(STDIN_FILENO, TIOCGWINSZ, &ts);
+	cols = ts.ws_col;
+#endif
 
-	printf("DUMP %05u+%2u marker=%05u N=noise L=low H=high\n", start, distance(start, stop), mstart > 0 ? mstart : mstop);
+	int xstart = start - overhead;
+	int xstopp = stopp + overhead;
+	int places = cols / 3 - 5;
 
-	printf("%c ", stream == lstream ? L : H);
-	if (mstart == -1)
-		green();
-	while (p++ != stop) {
-		if (p == mstart)
-			green();
-		printf("%3d", stream[p]);
-		if (p == mstop)
-			attroff();
+	if (distance(xstart, xstopp) > places) {
+
+		// screen to small - skip stream in the middle
+		int skip1 = xstart + places / 2;
+		int skip2 = xstopp - places / 2;
+
+		p = xstart - 1;
+		printf("%c ", xstream == lstream ? L : H);
+		while (p++ != skip1) {
+			if (p == start)
+				green();
+			printf("%3d", xstream[p]);
+		}
+
+		printf("  ...");
+
+		p = skip2 - 1;
+		while (p++ != xstopp) {
+			printf("%3d", xstream[p]);
+			if (p == stopp)
+				attroff();
+		}
+		printf("\n");
+
+	} else {
+
+		// all fit to screen
+		p = xstart - 1;
+		printf("%c ", xstream == lstream ? L : H);
+		while (p++ != xstopp) {
+			if (p == start)
+				green();
+			printf("%3d", xstream[p]);
+			if (p == stopp)
+				attroff();
+		}
+		printf("\n");
 	}
-	if (mstop == -1)
-		attroff();
-	printf("\n");
-
-	p = start - 1;
-	printf("%c ", xstream == lstream ? L : H);
-	while (p++ != stop) {
-		printf("%3d", xstream[p]);
-	}
-	printf("\n");
 }
 
 static void dump(uint16_t start, uint16_t stop) {
 	printf("DECODER dump [%05u:%05u] %u samples,", start, stop, distance(start, stop));
 	printf(" start pattern [%d, %d, %d, %d],", stream[start], stream[start + 1], stream[start + 2], stream[start + 3]);
 	printf(" stop  pattern [%d, %d, %d, %d]\n", stream[stop - 3], stream[stop - 2], stream[stop - 1], stream[stop]);
-	dump_stream(start - 16, start + 32, start, -1);
-	dump_stream(stop - 32, stop + 16, -1, stop);
+	dump_stream(hstream, start, stop, 16);
+	dump_stream(lstream, start, stop, 16);
 }
 
 // calculates the size of symbol table
@@ -876,11 +903,13 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 	estop -= 8;
 	while (tune(estop, R))
 		estop++;
+	estop--;
 
 	// fine tune left edge of window
 	estart += 16;
 	while (tune(estart, L))
 		estart--;
+	estart++;
 
 	// this is again crap
 	dist = distance(estart, estop);
@@ -888,13 +917,13 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 		return stop;
 
 	// EOT - the receiver is adjusting it's sensitivity back to noise level
-	// estimate signal strength based on time to next l+h samples
-	uint8_t ln = lstream[estop], hn = rfcfg->sample_on_0 ? hstream[estop + 1] : hstream[estop];
-	uint16_t lsn = lsamples[estop], hsn = rfcfg->sample_on_0 ? hsamples[estop + 1] : hsamples[estop];
+	// estimate signal strength from time to next l+h samples
+	uint8_t ln = lstream[estop + 1], hn = hstream[estop + 1];
+	uint16_t lsn = lsamples[estop + 1], hsn = hsamples[estop + 1];
 	uint32_t strenth = (lsn + hsn) * 100 / (UINT16_MAX * 2);
 
 	if (rfcfg->verbose)
-		printf("DECODER tuned  [%05u:%05u] %u samples, signal %u%% estimated from L+1 %d(%u) H+1 %d(%u) after EOT\n", estart, estop, dist, strenth, ln, lsn, hn, hsn);
+		printf("DECODER tuned  [%05u:%05u] %u samples, signal %u%% estimated from L+1 %d(%05u) H+1 %d(%05u) after EOT\n", estart, estop, dist, strenth, ln, lsn, hn, hsn);
 
 	// symbol soft error correction
 	iron(lstream, estart, estop);
