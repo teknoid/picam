@@ -20,11 +20,11 @@ static const char R = 'R';
 
 // ring buffers for low and high pulses, 16bit = original samples, 8bit = compressed to symbols
 static uint16_t lsamples[UINT16_MAX], hsamples[UINT16_MAX], streampointer;
-static uint8_t lstream[UINT16_MAX], hstream[UINT16_MAX], *stream;
+static uint8_t lstream[UINT16_MAX], hstream[UINT16_MAX];
 
 // tables for symbol and count
-uint16_t *counter, lcounter[SYMBOLS], hcounter[SYMBOLS];
-uint8_t *symbols, lsymbols[SYMBOLS], hsymbols[SYMBOLS];
+uint16_t lcounter[SYMBOLS], hcounter[SYMBOLS];
+uint8_t lsymbols[SYMBOLS], hsymbols[SYMBOLS];
 
 static int receiving_counter = 0;
 
@@ -48,20 +48,6 @@ static void attroff() {
 // clear the line
 static void clearline() {
 	printf("\x1b[1F\x1b[K");
-}
-
-// select the LOW stream
-static void select_lstream() {
-	stream = lstream;
-	counter = lcounter;
-	symbols = lsymbols;
-}
-
-// select the HIGH stream
-static void select_hstream() {
-	stream = hstream;
-	counter = hcounter;
-	symbols = hsymbols;
 }
 
 // select the counter table
@@ -172,9 +158,7 @@ static void dump_stream(uint8_t *xstream, uint16_t start, uint16_t stopp, int ov
 }
 
 static void dump(uint16_t start, uint16_t stop, int overhead) {
-	printf("DECODER dump [%05u:%05u] %u samples,", start, stop, distance(start, stop));
-	printf(" start pattern [%d, %d, %d, %d],", stream[start], stream[start + 1], stream[start + 2], stream[start + 3]);
-	printf(" stop  pattern [%d, %d, %d, %d]\n", stream[stop - 3], stream[stop - 2], stream[stop - 1], stream[stop]);
+	printf("DECODER dump [%05u:%05u] %u samples\n", start, stop, distance(start, stop));
 	dump_stream(hstream, start, stop, overhead);
 	dump_stream(lstream, start, stop, overhead);
 }
@@ -203,34 +187,6 @@ static uint8_t biggest_symbol(uint8_t *xsymbols) {
 		if (xsymbols[i] && xsymbols[i] > max)
 			max = xsymbols[i];
 	return max;
-}
-
-// find the smallest sample in given window and return it's position
-static uint16_t smallest_sample(uint8_t *xstream, uint16_t start, uint16_t stop) {
-	uint16_t pmin = start - 1, p = start - 1;
-	uint8_t s, min = UINT8_MAX;
-	while (p++ != stop) {
-		s = xstream[p];
-		if (s && (s < min)) {
-			min = s;
-			pmin = p;
-		}
-	}
-	return pmin;
-}
-
-// find the biggest sample in given window and return it's position
-static uint16_t biggest_sample(uint8_t *xstream, uint16_t start, uint16_t stop) {
-	uint16_t pmax = start - 1, p = start - 1;
-	uint8_t s, max = 0;
-	while (p++ != stop) {
-		s = xstream[p];
-		if (s && (s > max)) {
-			max = s;
-			pmax = p;
-		}
-	}
-	return pmax;
 }
 
 static void clear_tables() {
@@ -361,9 +317,12 @@ static void eat(uint16_t start, uint16_t stop) {
 	if (rfcfg->verbose)
 		printf("DECODER found SYNC L%2d code length %2d bits\n", sync, dist);
 
-	p = start;
-	do {
+	p = start - 1;
+	while (1) {
 		p = find(lstream, p, stop, sync);
+		if (p == stop)
+			break;
+
 		// the code before the first sync
 		if (!count++) {
 			dump(p - dist, p - 1, 2);
@@ -371,12 +330,16 @@ static void eat(uint16_t start, uint16_t stop) {
 			printf("%s\n", printbits64(code, 0x1011001101));
 			matrix_store(P_NEXUS, code);
 		}
+
 		// the code after the sync
 		dump(p + 1, p + dist, 2);
 		code = decode_low(p + 1, dist);
 		printf("%s\n", printbits64(code, 0x1011001101));
 		matrix_store(P_NEXUS, code);
-	} while (p++ != stop);
+
+		// next after sync
+		p++;
+	}
 }
 
 // determine minimum symbol distance
@@ -743,6 +706,41 @@ static void hammer(uint16_t start, uint16_t stop) {
 	}
 }
 
+// dumb 4-block symbol pattern matching - return the most smallest matching symbol
+static int sniff(uint8_t *xstream, uint16_t start) {
+	uint8_t p0 = xstream[start], p1 = xstream[start + 1], p2 = xstream[start + 2], p3 = xstream[start + 3];
+
+	// contains zeros
+	if (!p0 || !p1 || !p2 || !p3)
+		return 0;
+
+	// [3 3 3 3] full identical
+	if (p0 == p1 && p1 == p2 && p2 == p3)
+		return p0;
+
+	// [9 9 19 19] [9 19 19 9] symmetric identical values
+	if (p0 == p1 && p2 == p3)
+		return p0 < p2 ? p0 : p2;
+	if (p0 == p3 && p1 == p2)
+		return p0 < p1 ? p0 : p1;
+
+	// [5 10 5 10] alternating identical values
+	if (p0 == p2 && p1 == p3)
+		return p0 < p1 ? p0 : p1;
+
+	// [19 19 19 9] 3 identical values
+	if (p0 == p1 && p1 == p2)
+		return p0 < p3 ? p0 : p3;
+	if (p0 == p1 && p1 == p3)
+		return p0 < p2 ? p0 : p2;
+	if (p0 == p2 && p2 == p3)
+		return p0 < p1 ? p0 : p1;
+	if (p1 == p2 && p2 == p3)
+		return p0 < p1 ? p0 : p1;
+
+	return 0;
+}
+
 static int tune(uint16_t pos, const char direction) {
 	int e = 0;
 	uint8_t l, h, ll, hl, lh, hh;
@@ -845,35 +843,12 @@ static uint16_t probe_left(uint16_t start) {
 }
 
 static uint16_t probe_right(uint16_t start, uint16_t stop) {
-	uint16_t p;
-	uint8_t l, lv, h, hv, lmin, hmin, lmax, hmax;
-
-	// find the biggest/smallest H sample and learn it
-	p = biggest_sample(hstream, start, stop);
-	hmax = hstream[p];
-	p = smallest_sample(hstream, start, stop);
-	hmin = hstream[p];
-
-	// find the smallest L sample and learn them - also here we start expanding to right
-	p = biggest_sample(lstream, start, stop);
-	lmax = lstream[p];
-	p = smallest_sample(lstream, start, stop);
-	lmin = lstream[p];
-
-	// initially learn them
-	lsymbols[0] = lmin;
-	lcounter[0] = 1;
-	hsymbols[0] = hmin;
-	hcounter[0] = 1;
-	lsymbols[1] = lmax;
-	lcounter[1] = 1;
-	hsymbols[1] = hmax;
-	hcounter[1] = 1;
+	uint16_t p = start - 1;
+	uint8_t l, h, lv, hv;
 
 	if (rfcfg->verbose)
-		printf("DECODER probe        ►  {%2d,%2d} L      {%2d,%2d} H\n", lmin, lmax, hmin, hmax);
+		printf("DECODER probe        ►  {%2d,%2d} L      {%2d,%2d} H\n", lsymbols[0], lsymbols[1], hsymbols[0], hsymbols[1]);
 
-	p--;
 	int e = 0; // floating error counter
 	while (p++ != streampointer - 1) {
 		l = lstream[p];
@@ -890,14 +865,14 @@ static uint16_t probe_right(uint16_t start, uint16_t stop) {
 			e -= l;
 		else {
 			learn(lsymbols, l, R);
-			e += l < lmin ? lmin : l;
+			e += l < lsymbols[0] ? lsymbols[0] : l;
 		}
 
 		if (hv)
 			e -= h;
 		else {
 			learn(hsymbols, h, R);
-			e += h < hmin ? hmin : h;
+			e += h < hsymbols[0] ? hsymbols[0] : h;
 		}
 
 		if (e < 0)
@@ -931,6 +906,12 @@ static uint16_t probe(uint16_t start, uint16_t stop) {
 
 	if (rfcfg->verbose)
 		printf("DECODER L=low stream, H=high stream, symbol(valid), E=error counter, D=distance to stream head\n");
+
+	// initially learn symbols at the beginning and at the end
+	lsymbols[0] = sniff(lstream, start);
+	hsymbols[0] = sniff(hstream, start);
+	lsymbols[1] = sniff(lstream, stop - 4);
+	hsymbols[1] = sniff(hstream, stop - 4);
 
 	// expand window to right, then left - right is more reliable due to signal goes into noise on left side
 	estop = probe_right(start, stop);
@@ -1033,41 +1014,6 @@ static void scale(uint16_t start, uint16_t stop) {
 	}
 }
 
-// dumb 4-block symbol pattern matching
-static int sniff(uint16_t start) {
-	uint8_t p0 = stream[start], p1 = stream[start + 1], p2 = stream[start + 2], p3 = stream[start + 3];
-
-	// contains zeros
-	if (!p0 || !p1 || !p2 || !p3)
-		return 0;
-
-	// [3 3 3 3] full identical
-	if (p0 == p1 && p1 == p2 && p2 == p3)
-		return 1;
-
-	// [9 9 19 19] [9 19 19 9] symmetric identical values
-	if (p0 == p1 && p2 == p3)
-		return 1;
-	if (p0 == p3 && p1 == p2)
-		return 1;
-
-	// [5 10 5 10] alternating identical values
-	if (p0 == p2 && p1 == p3)
-		return 1;
-
-	// [19 19 19 9] 3 identical values
-	if (p0 == p1 && p1 == p2)
-		return 1;
-	if (p0 == p1 && p1 == p3)
-		return 1;
-	if (p0 == p2 && p2 == p3)
-		return 1;
-	if (p1 == p2 && p2 == p3)
-		return 1;
-
-	return 0;
-}
-
 // check the last received pulses - if between 200-5000µs we assume receiving is in progress
 static int receiving() {
 	uint16_t ptr = back(streampointer, 10);
@@ -1115,10 +1061,11 @@ void* stream_decoder(void *arg) {
 				rfcfg->collect_identical_codes ? "collect identical codes" : "process each code separately");
 
 	// select the stream to sample on
+	uint8_t *xstream;
 	if (rfcfg->sample_on_0)
-		select_lstream();
+		xstream = lstream;
 	else
-		select_hstream();
+		xstream = hstream;
 
 	// decoder main loop: pause, then decode block
 	uint16_t start = 0, stop = 0;
@@ -1143,7 +1090,7 @@ void* stream_decoder(void *arg) {
 		while (block > 8) {
 
 			// catch pattern by jumping 4-block-wise
-			if (!sniff(start)) {
+			if (!sniff(xstream, start)) {
 				start = forw(start, 4);
 				block -= 4;
 				continue;
@@ -1152,7 +1099,7 @@ void* stream_decoder(void *arg) {
 			uint16_t p1 = start;
 
 			// jump forward till no match
-			while (sniff(start + 4) && block > 4) {
+			while (sniff(xstream, start + 4) && block > 4) {
 				start = forw(start, 4);
 				block -= 4;
 			}
