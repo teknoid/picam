@@ -68,20 +68,6 @@ static uint8_t* select_symbols(uint8_t *xstream) {
 	return NULL;
 }
 
-// rewind stream to position
-static uint16_t back(uint16_t start, uint16_t positions) {
-	for (int i = 0; i < positions; i++)
-		start--;
-	return start;
-}
-
-// forward stream to position
-static uint16_t forw(uint16_t start, uint16_t positions) {
-	for (int i = 0; i < positions; i++)
-		start++;
-	return start;
-}
-
 // calculate the distance between two stream positions
 static uint16_t distance(uint16_t start, uint16_t stop) {
 	if (stop < start)
@@ -92,10 +78,10 @@ static uint16_t distance(uint16_t start, uint16_t stop) {
 
 // clears both streams between the positions
 static void clear_streams(uint16_t start, uint16_t stop) {
-	uint16_t p = start - 1;
-	while (p++ != stop) {
-		lstream[p] = 0;
-		hstream[p] = 0;
+	while (start != stop) {
+		lstream[start] = 0;
+		hstream[start] = 0;
+		start++;
 	}
 }
 
@@ -114,7 +100,7 @@ static void dump_stream(uint8_t *xstream, uint16_t start, uint16_t stopp, int ov
 #endif
 
 	int xstart = start - overhead;
-	int xstopp = stopp + overhead;
+	int xstopp = stopp + overhead + 1;
 	int places = cols / 3 - 5;
 
 	if (distance(xstart, xstopp) > places) {
@@ -123,35 +109,38 @@ static void dump_stream(uint8_t *xstream, uint16_t start, uint16_t stopp, int ov
 		int skip1 = xstart + places / 2;
 		int skip2 = xstopp - places / 2;
 
-		p = xstart - 1;
+		p = xstart;
 		printf("%c ", xstream == lstream ? L : H);
-		while (p++ != skip1) {
+		while (p != skip1) {
 			if (p == start)
 				green();
 			printf("%3d", xstream[p]);
+			p++;
 		}
 
 		printf("  ...");
 
-		p = skip2 - 1;
-		while (p++ != xstopp) {
+		p = skip2;
+		while (p != xstopp) {
 			printf("%3d", xstream[p]);
 			if (p == stopp)
 				attroff();
+			p++;
 		}
 		printf("\n");
 
 	} else {
 
 		// all fit to screen
-		p = xstart - 1;
+		p = xstart;
 		printf("%c ", xstream == lstream ? L : H);
-		while (p++ != xstopp) {
+		while (p != xstopp) {
 			if (p == start)
 				green();
 			printf("%3d", xstream[p]);
 			if (p == stopp)
 				attroff();
+			p++;
 		}
 		printf("\n");
 	}
@@ -257,11 +246,9 @@ static uint64_t decode_high(uint16_t pos, uint8_t bits) {
 }
 
 static uint16_t find(uint8_t *xstream, uint16_t start, uint16_t stop, uint8_t s) {
-	start--;
-	while (start++ != stop)
-		if (xstream[start] == s)
-			return start;
-	return stop;
+	while (start != stop && s != xstream[start])
+		start++;
+	return start;
 }
 
 // find the SYNC symbol - min 3 repeats with identical distances > 8
@@ -283,10 +270,10 @@ static void find_sync(uint8_t *xstream, uint16_t start, uint16_t stop, uint8_t *
 			positions[j++] = p;
 		} while (p++ != stop && j < SYMBOLS);
 
-		// convert positions into distances
+		// convert positions into code bit lengths
 		for (int x = 1; x < SYMBOLS; x++)
 			if (positions[x])
-				positions[x - 1] = distance(positions[x - 1], positions[x]);
+				positions[x - 1] = distance(positions[x - 1], positions[x]) - 2;
 
 		if (positions[0] < 8 || positions[1] < 8 || positions[2] < 8)
 			continue;
@@ -308,7 +295,7 @@ static void find_sync(uint8_t *xstream, uint16_t start, uint16_t stop, uint8_t *
 				identical += positions[x] == positions[y];
 			if (identical == 3) {
 				*sync = s;
-				*dist = positions[x] - 2;
+				*dist = positions[x];
 				return;
 			}
 		}
@@ -318,7 +305,7 @@ static void find_sync(uint8_t *xstream, uint16_t start, uint16_t stop, uint8_t *
 // consume the signal
 static void eat(uint16_t start, uint16_t stop) {
 	uint64_t code;
-	uint16_t p = 0, count = 0;
+	uint16_t count = 0;
 	uint8_t sync = 0, dist = 0;
 
 	if (rfcfg->verbose)
@@ -331,29 +318,28 @@ static void eat(uint16_t start, uint16_t stop) {
 	if (rfcfg->verbose)
 		printf("DECODER found SYNC L%2d code length %2d bits\n", sync, dist);
 
-	p = start - 1;
-	while (1) {
-		p = find(lstream, p, stop, sync);
-		if (p == stop)
+	do {
+		start = find(lstream, start, stop, sync);
+		if (start == stop)
 			break;
 
 		// the code before the first sync
 		if (!count++) {
-			dump(p - dist, p - 1, 2);
-			code = decode_low(p - dist, dist);
+			dump(start - dist, start - 1, 2);
+			code = decode_low(start - dist, dist);
 			printf("%s\n", printbits64(code, 0x1011001101));
 			matrix_store(P_NEXUS, code);
 		}
 
 		// the code after the sync
-		dump(p + 1, p + dist, 2);
-		code = decode_low(p + 1, dist);
+		dump(start + 1, start + dist, 2);
+		code = decode_low(start + 1, dist);
 		printf("%s\n", printbits64(code, 0x1011001101));
 		matrix_store(P_NEXUS, code);
 
 		// next after sync
-		p++;
-	}
+		start++;
+	} while (start != stop);
 }
 
 // determine minimum symbol distance
@@ -474,8 +460,8 @@ static void learn(uint8_t *xsymbols, uint8_t s, const char direction) {
 static void condense(uint8_t *xsymbols) {
 	uint16_t *xcounter = select_counter(xsymbols);
 
-	int repeat;
-	do {
+	int repeat = 1;
+	while (repeat) {
 		repeat = 0;
 		for (int i = 0; i < (SYMBOLS - 1); i++)
 			if (!xsymbols[i] && xsymbols[i + 1]) {
@@ -485,7 +471,7 @@ static void condense(uint8_t *xsymbols) {
 				xcounter[i + 1] = 0;
 				repeat = 1;
 			}
-	} while (repeat);
+	}
 }
 
 // sort by highest occurrence
@@ -493,8 +479,8 @@ static void sort(uint8_t *xsymbols) {
 	uint16_t c, *xcounter = select_counter(xsymbols);
 	uint8_t s;
 
-	int repeat;
-	do {
+	int repeat = 1;
+	while (repeat) {
 		repeat = 0;
 		for (int i = 0; i < (SYMBOLS - 1); i++)
 			if (xcounter[i + 1] > xcounter[i]) {
@@ -506,7 +492,7 @@ static void sort(uint8_t *xsymbols) {
 				xsymbols[i + 1] = s;
 				repeat = 1;
 			}
-	} while (repeat);
+	}
 }
 
 // straighten symbols
@@ -516,15 +502,18 @@ static void align(uint8_t *xsymbols) {
 	if (rfcfg->verbose)
 		printf("DECODER %c aligning ", xsymbols == lsymbols ? L : H);
 
-	// find minimum symbol distance
-	uint8_t d, dmin = symbol_distance(xsymbols);
-	uint8_t s = size_symbols(xsymbols);
+	while (1) {
 
-	// minimum symbol distance is greater/equal table size --> we would loose information, so stop merging
-	while (dmin < s) {
+		// calculate table size and minimum symbol distance
+		uint8_t dmin = symbol_distance(xsymbols), d;
+		uint8_t size = size_symbols(xsymbols);
 
 		if (rfcfg->verbose)
-			printf("    d=%d s=%d ", dmin, s);
+			printf("    d=%d s=%d ", dmin, size);
+
+		// minimum symbol distance is greater/equal table size --> we would loose information, so stop merging
+		if (dmin >= size)
+			break;
 
 		// do the merge for current distance
 		for (int x = 0; x < SYMBOLS; x++) {
@@ -543,10 +532,6 @@ static void align(uint8_t *xsymbols) {
 				condense(xsymbols);
 			}
 		}
-
-		// recalculate size and min symbol distance
-		dmin = symbol_distance(xsymbols);
-		s = size_symbols(xsymbols);
 	}
 
 	if (rfcfg->verbose)
@@ -576,79 +561,59 @@ static void filter() {
 
 // move the stream to the right without gaps between
 static void melt_condense(uint16_t start, uint16_t stop) {
-	uint16_t p, pgap;
-
-	int gaps;
-	do {
-		gaps = 0;
-		p = stop + 1;
-		while (--p != start) {
-
-			if (lstream[p] && hstream[p])
-				continue;
-
-			// close this gap
-			pgap = p + 1;
-			while (--pgap != start) {
-				lstream[pgap] = lstream[pgap - 1];
-				hstream[pgap] = hstream[pgap - 1];
+	while (stop != start) {
+		uint16_t available = distance(start, stop);
+		while (available-- && !lstream[stop] && !hstream[stop]) {
+			uint16_t p = stop;
+			while (p != start) {
+				lstream[p] = lstream[p - 1];
+				hstream[p] = hstream[p - 1];
+				p--;
 			}
-
-			// create a gap at the beginning
 			lstream[start] = 0;
 			hstream[start] = 0;
-			gaps = 1;
-			start++;
-			break;
 		}
-	} while (gaps);
+		stop--;
+	}
 }
 
 // melt small spikes (L0, L1, ...) into next L symbol
 static void melt(uint16_t start, uint16_t stop) {
-	uint16_t p = start - 1;
 	uint8_t d, dmin = lsymbols[0] < lsymbols[1] ? lsymbols[0] : lsymbols[1];
-	if (dmin)
-		dmin--;
-	while (p++ != stop) {
-		// melt and create a gap
-		d = lstream[p] + hstream[p];
+
+	// melt and create a gap
+	while (start != stop) {
+		d = lstream[start] + hstream[start];
 		if (d < dmin) {
-			lstream[p + 1] += d;
-			lstream[p] = 0;
-			hstream[p] = 0;
+			lstream[start + 1] += d;
+			lstream[start] = 0;
+			hstream[start] = 0;
 		}
+		start++;
 	}
 }
 
 // soft ironing stream up to minimum symbol distance
 static void iron(uint8_t *xstream, uint16_t start, uint16_t stop) {
-	uint16_t p;
 	uint8_t s, m, *xsymbols = select_symbols(xstream);
 	uint8_t dmin = symbol_distance(xsymbols);
 
 	for (int i = 0; i <= dmin; i++) {
-
 		if (rfcfg->verbose)
 			printf("DECODER %s ironing d=%d ", xstream == lstream ? "L" : "H", i);
 
-		p = start - 1;
+		uint16_t p = start;
 		int fixed = 0;
-		while (p++ != stop) {
-
+		while (p != stop) {
 			s = xstream[p];
-			if (!s)
-				continue;
-
 			m = match(xsymbols, s, i);
-			if (!m)
-				continue;
-			if (m != s) {
+			if (s && m && s != m) {
 				if (rfcfg->verbose)
 					printf("%d->%d ", s, m);
 				xstream[p] = m;
 				fixed++;
 			}
+			p++;
 		}
 
 		if (rfcfg->verbose) {
@@ -665,13 +630,12 @@ static void iron(uint8_t *xstream, uint16_t start, uint16_t stop) {
 
 // brutal straighten invalid symbols
 static void hammer(uint16_t start, uint16_t stop) {
+	uint8_t l, lv, h, hv;
+
 	// do not try to fix errors on the left side - we do not know if they belong to the signal
 	start += 8;
 	// and of course not the last position which indicates the EOT
 	stop -= 1;
-
-	uint16_t p = start - 1;
-	uint8_t l, lv, h, hv;
 
 	if (rfcfg->verbose) {
 		printf("DECODER invalid symbols ");
@@ -679,9 +643,9 @@ static void hammer(uint16_t start, uint16_t stop) {
 	}
 
 	int invalid = 0;
-	while (p++ != stop - 1) {
-		l = lstream[p];
-		h = hstream[p];
+	while (start != stop) {
+		l = lstream[start];
+		h = hstream[start];
 
 		lv = valid(lsymbols, l);
 		hv = valid(hsymbols, h);
@@ -689,17 +653,19 @@ static void hammer(uint16_t start, uint16_t stop) {
 		if (!lv) {
 			invalid++;
 			if (rfcfg->verbose)
-				printf("L%d[%u] ", l, p);
+				printf("L%d[%u] ", l, start);
 		}
 
 		if (!hv) {
 			invalid++;
 			if (rfcfg->verbose)
-				printf("H%d[%u] ", h, p);
+				printf("H%d[%u] ", h, start);
 			if (!h) {
 				// TODO - an dieser stelle wurde der Empfang durch ein zu langes H unterbrochen - das sind genau die fehlenden bits
 			}
 		}
+
+		start++;
 	}
 
 	if (rfcfg->verbose) {
@@ -752,8 +718,8 @@ static int tune(uint16_t pos, int tolerance, const char direction) {
 }
 
 static uint16_t probe_left(uint16_t start) {
-	uint16_t p = start + 1;
 	uint8_t l, lv, h, hv;
+	int e = 0; // floating error counter
 
 	// to the right we already collected symbols - use them as error indicator
 	uint8_t lmin = smallest_symbol(lsymbols), hmin = smallest_symbol(hsymbols);
@@ -762,17 +728,17 @@ static uint16_t probe_left(uint16_t start) {
 
 	printf("DECODER probe  ◄        {%2d,%2d} L      {%2d,%2d} H   %3d Ex\n", lmin, lmax, hmin, hmax, ex);
 
-	int e = 0; // floating error counter
-	while (p-- != streampointer + 1) {
-		l = lstream[p];
-		h = hstream[p];
+	uint16_t stop = streampointer;
+	while (start != stop) {
+		l = lstream[start];
+		h = hstream[start];
 
 		if (!l && !h)
 			break; // dead stream
 
 		// biggest on left - might be a sync, but bigger are not allowed
 		if (l > (lmax + hmax) || h > (lmax + hmax)) {
-			printf("DECODER probe |◄%05d   %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
+			printf("DECODER probe |◄%05d   %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", start, l, lv, h, hv, e, distance(start, streampointer));
 			break;
 		}
 
@@ -798,26 +764,28 @@ static uint16_t probe_left(uint16_t start) {
 
 		// tolerate sampling errors, but too much -> jump out
 		if (e > ex) {
-			printf("DECODER probe |◄%05d   %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
+			printf("DECODER probe |◄%05d   %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", start, l, lv, h, hv, e, distance(start, streampointer));
 			break;
 		}
 
-		printf("DECODER probe  ◄%05d   %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
+		printf("DECODER probe  ◄%05d   %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", start, l, lv, h, hv, e, distance(start, streampointer));
+
+		start--;
 	}
-	return p;
+	return start;
 }
 
-static uint16_t probe_right(uint16_t start, uint16_t stop) {
-	uint16_t p = start - 1;
+static uint16_t probe_right(uint16_t start) {
 	uint8_t l, h, lv, hv;
+	int e = 0; // floating error counter
 
 	if (rfcfg->verbose)
 		printf("DECODER probe        ►  {%2d,%2d} L      {%2d,%2d} H\n", lsymbols[0], lsymbols[1], hsymbols[0], hsymbols[1]);
 
-	int e = 0; // floating error counter
-	while (p++ != streampointer - 1) {
-		l = lstream[p];
-		h = hstream[p];
+	uint16_t stop = streampointer;
+	while (start != stop) {
+		l = lstream[start];
+		h = hstream[start];
 
 		if (!l && !h)
 			break; // dead stream
@@ -844,13 +812,15 @@ static uint16_t probe_right(uint16_t start, uint16_t stop) {
 
 		// reached EOT
 		if (e >= UINT8_MAX - 10) {
-			printf("DECODER probe   %05d►| %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
+			printf("DECODER probe   %05d►| %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", start, l, lv, h, hv, e, distance(start, streampointer));
 			break;
 		}
 
-		printf("DECODER probe   %05d►  %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", p, l, lv, h, hv, e, distance(p, streampointer));
+		printf("DECODER probe   %05d►  %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", start, l, lv, h, hv, e, distance(start, streampointer));
+
+		start++;
 	}
-	return p;
+	return start;
 }
 
 // find begin and end of a signal by analyzing symbols
@@ -859,8 +829,8 @@ static uint16_t probe(uint8_t *xstream, uint16_t start, uint16_t stop) {
 
 	// this is crap
 	dist = distance(start, stop);
-	if (dist < 16)
-		return stop;
+	if (dist < 16 || dist > 2048)
+		return start;
 
 	if (rfcfg->verbose)
 		printf("DECODER probing [%05u:%05u] %u samples\n", start, stop, dist);
@@ -872,8 +842,8 @@ static uint16_t probe(uint8_t *xstream, uint16_t start, uint16_t stop) {
 		printf("DECODER L=low stream, H=high stream, symbol(valid), E=error counter, D=distance to stream head\n");
 
 	// expand window to right - more reliable, then left - signal comes out of noise on that side
-	estop = probe_right(start + 4, stop);
-	estart = probe_left(start);
+	estop = probe_right(start + 4);
+	estart = probe_left(start + 4);
 
 	// this is crap
 	dist = distance(estart, estop);
@@ -892,13 +862,13 @@ static uint16_t probe(uint8_t *xstream, uint16_t start, uint16_t stop) {
 	while (!lstream[estart] && !hstream[estart] && estart != estop) // adjust start
 		estart++;
 
+	if (rfcfg->verbose)
+		printf("DECODER after melting [%05u:%05u] %u samples\n", estart, estop, dist);
+
 	// this is again crap
 	dist = distance(estart, estop);
 	if (dist < 16 || dist > 2048)
 		return stop;
-
-	if (rfcfg->verbose)
-		printf("DECODER after melting [%05u:%05u] %u samples\n", estart, estop, dist);
 
 	// fine tune right edge of window
 	estop -= 8;
@@ -944,12 +914,12 @@ static uint16_t probe(uint8_t *xstream, uint16_t start, uint16_t stop) {
 
 // round pulse length to multiples of 100 and divide by 100
 static void scale(uint16_t start, uint16_t stop) {
-	uint16_t sl, sh, p = start + 1, smax = UINT8_MAX * 100;
+	uint16_t sl, sh, smax = UINT8_MAX * 100;
 	uint8_t l, h;
 
-	while (p++ != stop) {
-		sl = lsamples[p];
-		sh = hsamples[p];
+	while (start != stop) {
+		sl = lsamples[start];
+		sh = hsamples[start];
 
 		// too big - ? multiple signals at same time, receiver sensitivity was overridden by the stronger
 		if (sl > smax)
@@ -967,8 +937,10 @@ static void scale(uint16_t start, uint16_t stop) {
 		else
 			h = (sh / 100) + 1;
 
-		lstream[p] = l;
-		hstream[p] = h;
+		lstream[start] = l;
+		hstream[start] = h;
+
+		start++;
 	}
 }
 
@@ -1009,7 +981,7 @@ static int sniff(uint8_t *xstream, uint16_t start) {
 
 // check the last received pulses - if between 200-5000µs we assume receiving is in progress
 static int receiving() {
-	uint16_t ptr = back(streampointer, 10);
+	uint16_t ptr = streampointer - 10;
 
 	int valid = 0;
 	for (int i = 0; i < 8; i++) {
@@ -1061,7 +1033,7 @@ void* stream_decoder(void *arg) {
 		xstream = hstream;
 
 	// decoder main loop: pause, then decode block
-	uint16_t start = 0, stop = 0;
+	uint16_t p1, p2, start = 0, stop = 0;
 	while (1) {
 		msleep(rfcfg->decoder_delay);
 
@@ -1079,31 +1051,35 @@ void* stream_decoder(void *arg) {
 		scale(start, stop);
 
 		// pattern sniffer loop
-		uint16_t block = distance(start, stop);
-		while (block > 8) {
+		int ok = 1;
+		while (ok) {
 
 			// catch pattern by jumping 4-block-wise
-			if (!sniff(xstream, start)) {
-				start = forw(start, 4);
-				block -= 4;
-				continue;
+			while (ok && !sniff(xstream, start)) {
+				start += 4;
+				ok = distance(start, stop) > 8;
 			}
 
-			uint16_t p1 = start;
+			if (!ok)
+				break; // reached stop area
 
-			// jump forward till no match
-			while (sniff(xstream, start + 4) && block > 4) {
-				start = forw(start, 4);
-				block -= 4;
+			p1 = start;
+
+			// jump forward till no match anymore
+			while (ok && sniff(xstream, start)) {
+				start += 4;
+				ok = distance(start, stop) > 8;
 			}
 
-			uint16_t p2 = start;
+			if (!ok)
+				break; // reached stop area
+
+			p2 = start;
 
 			// detailed symbol analyzing
-			if (p1 != p2)
-				start = probe(xstream, p1, p2);
-
-			block = distance(++start, stop);
+			start = probe(xstream, p1, p2);
+			start += 4;
+			ok = distance(start, stop) > 8;
 		}
 
 		matrix_decode();
