@@ -99,6 +99,22 @@ static int usage() {
 	return EXIT_FAILURE;
 }
 
+void rfsniffer_test(int argc, char **argv) {
+	uint16_t test = 0;
+
+	test += 4;
+	printf("test uint overflow +4 %05u\n", test);
+	test -= 8;
+	printf("test uint overflow -8 %05u\n", test);
+
+	test = UINT16_MAX - 4;
+	printf("test uint overflow MAX -4 %05u\n", test);
+	test += 8;
+	printf("test uint overflow MAX +8 %05u\n", test);
+
+	rfcodec_test(argc, argv);
+}
+
 static int rfsniffer_main(int argc, char **argv) {
 	if (gpio_init() < 0)
 		return -1;
@@ -170,7 +186,7 @@ static int rfsniffer_main(int argc, char **argv) {
 				rfcfg->timestamp = 1; // TODO
 				break;
 			case 'T':
-				rfcodec_test(argc, argv);
+				rfsniffer_test(argc, argv);
 				return 0;
 			case 'v':
 				rfcfg->verbose = 1;

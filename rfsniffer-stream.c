@@ -100,7 +100,7 @@ static void dump_stream(uint8_t *xstream, uint16_t start, uint16_t stopp, int ov
 #endif
 
 	int xstart = start - overhead;
-	int xstopp = stopp + overhead + 1;
+	int xstopp = stopp + overhead;
 	int places = cols / 3 - 5;
 
 	if (distance(xstart, xstopp) > places) {
@@ -178,6 +178,23 @@ static uint8_t biggest_symbol(uint8_t *xsymbols) {
 	return max;
 }
 
+// determine minimum symbol distance
+static uint8_t symbol_distance(uint8_t *xsymbols) {
+	uint8_t m, min = 0xff;
+	for (int x = 0; x < SYMBOLS; x++) {
+		if (!xsymbols[x])
+			break;
+		for (int y = x + 1; y < SYMBOLS; y++) {
+			if (!xsymbols[y])
+				break;
+			m = xsymbols[x] < xsymbols[y] ? (xsymbols[y] - xsymbols[x]) : (xsymbols[x] - xsymbols[y]);
+			if (m < min)
+				min = m;
+		}
+	}
+	return min == 0xff ? xsymbols[0] : min; // only one symbol?
+}
+
 static void clear_tables() {
 	memset(lsymbols, 0, SYMBOLS * sizeof(uint8_t));
 	memset(lcounter, 0, SYMBOLS * sizeof(uint16_t));
@@ -199,6 +216,13 @@ static void dump_tables(const char *message) {
 	printf("\n");
 }
 
+static uint8_t divider(uint8_t s1, uint8_t s2) {
+	uint8_t smin = s1 < s2 ? s1 : s2;
+	uint8_t smax = s1 > s2 ? s1 : s2;
+	uint8_t div = smin + (smax - smin) / 2;
+	return div;
+}
+
 //
 // short low or long low pulse
 //   _   _     _     _
@@ -217,12 +241,12 @@ static void dump_tables(const char *message) {
 //
 static uint64_t decode_low(uint16_t pos, int bits) {
 	uint64_t code = 0;
-	uint8_t l, lmin = lsymbols[0] < lsymbols[1] ? lsymbols[0] : lsymbols[1];
+	uint8_t div = divider(lsymbols[0], lsymbols[1]);
 
 	for (int i = 0; i < bits; i++) {
 		code <<= 1;
-		l = lstream[pos++];
-		if (l != UINT8_MAX && l > lmin)
+		uint8_t l = lstream[pos++];
+		if (l != UINT8_MAX && l > div)
 			code++;
 	}
 	return code;
@@ -235,11 +259,12 @@ static uint64_t decode_low(uint16_t pos, int bits) {
 //      0             1
 static uint64_t decode_high(uint16_t pos, uint8_t bits) {
 	uint64_t code = 0;
-	uint8_t h, hmin = hsymbols[0] < hsymbols[1] ? hsymbols[0] : hsymbols[1];
+	uint8_t div = divider(hsymbols[0], hsymbols[1]);
+
 	for (int i = 0; i < bits; i++) {
 		code <<= 1;
-		h = hstream[pos];
-		if (h != UINT8_MAX && h > hmin)
+		uint8_t h = hstream[pos];
+		if (h != UINT8_MAX && h > div)
 			code++;
 	}
 	return code;
@@ -342,23 +367,6 @@ static void eat(uint16_t start, uint16_t stop) {
 	} while (start != stop);
 }
 
-// determine minimum symbol distance
-static uint8_t symbol_distance(uint8_t *xsymbols) {
-	uint8_t m, min = 0xff;
-	for (int x = 0; x < SYMBOLS; x++) {
-		if (!xsymbols[x])
-			break;
-		for (int y = x + 1; y < SYMBOLS; y++) {
-			if (!xsymbols[y])
-				break;
-			m = xsymbols[x] < xsymbols[y] ? (xsymbols[y] - xsymbols[x]) : (xsymbols[x] - xsymbols[y]);
-			if (m < min)
-				min = m;
-		}
-	}
-	return min == 0xff ? xsymbols[0] : min; // only one symbol?
-}
-
 // returns the best matching symbol for given distance
 static uint8_t match(uint8_t *xsymbols, uint8_t s, uint8_t d) {
 	uint8_t t, td, tdmin = UINT8_MAX, tmin = 0;
@@ -420,7 +428,7 @@ static void learn(uint8_t *xsymbols, uint8_t s, const char direction) {
 	// right: symbols only allowed to grow, not shrink, also learn big SYNC pulses
 	if (direction == R) {
 		uint8_t lmin = smallest_symbol(lsymbols), hmin = smallest_symbol(hsymbols);
-		uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
+		// uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
 		// if (s > UINT8_MAX / 2)
 		// if (lmax && hmax && s > (lmax + hmax) * 2)
 		if (s > (UINT8_MAX - lmin - hmin))
@@ -430,7 +438,7 @@ static void learn(uint8_t *xsymbols, uint8_t s, const char direction) {
 	// left: symbols only allowed to shrink, not grow, except multiples of the smallest
 	if (direction == L) {
 		uint8_t lmin = smallest_symbol(lsymbols), hmin = smallest_symbol(hsymbols);
-		uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
+		uint8_t lmax = biggest_symbol(lsymbols);
 		int multiple = 0, m1 = 1, m2 = 1, m3 = 1;
 		if (xsymbols == lsymbols) {
 			if (lmin)
@@ -566,10 +574,12 @@ static void melt_condense(uint16_t start, uint16_t stop) {
 		while (available-- && !lstream[stop] && !hstream[stop]) {
 			uint16_t p = stop;
 			while (p != start) {
+				// close the gap
 				lstream[p] = lstream[p - 1];
 				hstream[p] = hstream[p - 1];
 				p--;
 			}
+			// create a gap at the beginning
 			lstream[start] = 0;
 			hstream[start] = 0;
 		}
@@ -584,10 +594,17 @@ static void melt(uint16_t start, uint16_t stop) {
 	// melt and create a gap
 	while (start != stop) {
 		d = lstream[start] + hstream[start];
-		if (d < dmin) {
+		if (d <= dmin) {
+			dump(start, start, 4);
+			if (rfcfg->verbose)
+				printf("DECODER %05d melting %d + %d -> %d\n", start, lstream[start], hstream[start], lstream[start + 1]);
+			// melt
 			lstream[start + 1] += d;
+			// create a gap
 			lstream[start] = 0;
 			hstream[start] = 0;
+			dump(start, start, 4);
+			printf("\n");
 		}
 		start++;
 	}
@@ -862,13 +879,13 @@ static uint16_t probe(uint8_t *xstream, uint16_t start, uint16_t stop) {
 	while (!lstream[estart] && !hstream[estart] && estart != estop) // adjust start
 		estart++;
 
-	if (rfcfg->verbose)
-		printf("DECODER after melting [%05u:%05u] %u samples\n", estart, estop, dist);
-
 	// this is again crap
 	dist = distance(estart, estop);
 	if (dist < 16 || dist > 2048)
 		return stop;
+
+	if (rfcfg->verbose)
+		printf("DECODER after melting [%05u:%05u] %u samples\n", estart, estop, dist);
 
 	// fine tune right edge of window
 	estop -= 8;
