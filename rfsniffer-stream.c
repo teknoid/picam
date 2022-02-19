@@ -244,21 +244,14 @@ static uint64_t decode_low(uint16_t pos, int bits) {
 //     _           ___
 //   _| |___     _|   |_
 //      0             1
-static uint64_t decode_high(uint16_t pos, uint8_t bits, uint16_t divider) {
+static uint64_t decode_high(uint16_t pos, uint8_t bits) {
 	uint64_t code = 0;
-	uint8_t l, h;
+	uint8_t h, hmin = hsymbols[0] < hsymbols[1] ? hsymbols[0] : hsymbols[1];
 	for (int i = 0; i < bits; i++) {
-		l = lstream[pos];
-		h = hstream[pos];
-
-		if (!l && !h)
-			return 0;
-
-		if (h > divider)
-			code++;
-
 		code <<= 1;
-		pos++;
+		h = hstream[pos];
+		if (h != UINT8_MAX && h > hmin)
+			code++;
 	}
 	return code;
 }
@@ -276,8 +269,9 @@ static void find_sync(uint8_t *xstream, uint16_t start, uint16_t stop, uint8_t *
 	uint16_t p, positions[SYMBOLS];
 	uint8_t s, *xsymbols = select_symbols(xstream);
 
-	memset(positions, 0, SYMBOLS * sizeof(uint16_t));
 	for (int i = 0; i < SYMBOLS; i++) {
+		memset(positions, 0, SYMBOLS * sizeof(uint16_t));
+
 		s = xsymbols[i];
 		if (!s)
 			break;
@@ -289,14 +283,34 @@ static void find_sync(uint8_t *xstream, uint16_t start, uint16_t stop, uint8_t *
 			positions[j++] = p;
 		} while (p++ != stop && j < SYMBOLS);
 
-		int d0 = distance(positions[0], positions[1]);
-		int d1 = distance(positions[1], positions[2]);
-		int d2 = distance(positions[2], positions[3]);
+		// convert positions into distances
+		for (int x = 1; x < SYMBOLS; x++)
+			if (positions[x])
+				positions[x - 1] = distance(positions[x - 1], positions[x]);
 
-		if (d0 > 8 && d0 == d1 && d1 == d2) {
-			*sync = s;
-			*dist = d0 - 2;
-			return;
+		if (positions[0] < 8 || positions[1] < 8 || positions[2] < 8)
+			continue;
+
+		if (rfcfg->verbose) {
+			printf("DECODER possible %c%d SYNC symbol with distances ", xstream == lstream ? L : H, s);
+			for (int x = 0; x < SYMBOLS; x++)
+				if (positions[x])
+					printf("%d ", positions[x]);
+			printf("\n");
+		}
+
+		// find at least 3 identical distances
+		for (int x = 0; x < SYMBOLS; x++) {
+			if (!positions[x])
+				break;
+			int identical = 0;
+			for (int y = x + 1; y < SYMBOLS; y++)
+				identical += positions[x] == positions[y];
+			if (identical == 3) {
+				*sync = s;
+				*dist = positions[x] - 2;
+				return;
+			}
 		}
 	}
 }
@@ -418,25 +432,32 @@ static void learn(uint8_t *xsymbols, uint8_t s, const char direction) {
 		return;
 
 	// right: symbols only allowed to grow, not shrink, also learn big SYNC pulses
-	uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
-//	if (direction == R && s > UINT8_MAX / 2)
-	if (direction == R && lmax && hmax && s > (lmax + hmax) * 2)
-		return;
+	if (direction == R) {
+		uint8_t lmin = smallest_symbol(lsymbols), hmin = smallest_symbol(hsymbols);
+		uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
+		// if (s > UINT8_MAX / 2)
+		// if (lmax && hmax && s > (lmax + hmax) * 2)
+		if (s > (UINT8_MAX - lmin - hmin))
+			return;
+	}
 
 	// left: symbols only allowed to shrink, not grow, except multiples of the smallest
-	uint8_t lmin = smallest_symbol(lsymbols), hmin = smallest_symbol(hsymbols);
-	int multiple = 0, m1 = 1, m2 = 1, m3 = 1;
-	if (xsymbols == lsymbols) {
-		if (lmin)
-			m1 = (s - 1) % lmin, m2 = s % lmin, m3 = (s + 1) % lmin;
-		multiple = !m1 || !m2 || !m3;
-	} else {
-		if (lmax)
-			m1 = (s - 1) % lmax, m2 = s % lmax, m3 = (s + 1) % lmax;
-		multiple = !m1 || !m2 || !m3;
+	if (direction == L) {
+		uint8_t lmin = smallest_symbol(lsymbols), hmin = smallest_symbol(hsymbols);
+		uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
+		int multiple = 0, m1 = 1, m2 = 1, m3 = 1;
+		if (xsymbols == lsymbols) {
+			if (lmin)
+				m1 = (s - 1) % lmin, m2 = s % lmin, m3 = (s + 1) % lmin;
+			multiple = !m1 || !m2 || !m3;
+		} else {
+			if (lmax)
+				m1 = (s - 1) % lmax, m2 = s % lmax, m3 = (s + 1) % lmax;
+			multiple = !m1 || !m2 || !m3;
+		}
+		if (s > lmin && s > hmin && !multiple)
+			return;
 	}
-	if (direction == L && s > lmin && s > hmin && !multiple)
-		return;
 
 	// find next free entry
 	int i = 0;
