@@ -443,7 +443,7 @@ uint32_t gpio_micros_since(uint32_t *when) {
 	if (now > *when)
 		elapsed = now - *when;
 	else
-		elapsed = 0xffffffff - *when + now;
+		elapsed = UINT32_MAX - *when + now;
 	*when = now;
 	return elapsed;
 }

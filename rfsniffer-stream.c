@@ -100,7 +100,7 @@ static void dump_stream(uint8_t *xstream, uint16_t start, uint16_t stopp, int ov
 #endif
 
 	int xstart = start - overhead;
-	int xstopp = stopp + overhead;
+	int xstopp = stopp + overhead + 1;
 	int places = cols / 3 - 5;
 
 	if (distance(xstart, xstopp) > places) {
@@ -735,6 +735,7 @@ static int tune(uint16_t pos, int tolerance, const char direction) {
 }
 
 static uint16_t probe_left(uint16_t start) {
+	uint16_t stop = streampointer;
 	uint8_t l, lv, h, hv;
 	int e = 0; // floating error counter
 
@@ -743,9 +744,8 @@ static uint16_t probe_left(uint16_t start) {
 	uint8_t lmax = biggest_symbol(lsymbols), hmax = biggest_symbol(hsymbols);
 	uint16_t ex = 5 * (lmin + hmin);
 
-	printf("DECODER probe  ◄        {%2d,%2d} L      {%2d,%2d} H   %3d Ex\n", lmin, lmax, hmin, hmax, ex);
+	printf("DECODER probe  [%05u]  {%2d,%2d} L      {%2d,%2d} H   %3d Ex\n", stop, lmin, lmax, hmin, hmax, ex);
 
-	uint16_t stop = streampointer;
 	while (start != stop) {
 		l = lstream[start];
 		h = hstream[start];
@@ -755,7 +755,7 @@ static uint16_t probe_left(uint16_t start) {
 
 		// biggest on left - might be a sync, but bigger are not allowed
 		if (l > (lmax + hmax) || h > (lmax + hmax)) {
-			printf("DECODER probe |◄%05d   %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", start, l, lv, h, hv, e, distance(start, streampointer));
+			printf("DECODER probe |◄%05d   %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", start, l, lv, h, hv, e, distance(start, stop));
 			break;
 		}
 
@@ -781,11 +781,11 @@ static uint16_t probe_left(uint16_t start) {
 
 		// tolerate sampling errors, but too much -> jump out
 		if (e > ex) {
-			printf("DECODER probe |◄%05d   %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", start, l, lv, h, hv, e, distance(start, streampointer));
+			printf("DECODER probe |◄%05d   %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", start, l, lv, h, hv, e, distance(start, stop));
 			break;
 		}
 
-		printf("DECODER probe  ◄%05d   %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", start, l, lv, h, hv, e, distance(start, streampointer));
+		printf("DECODER probe  ◄%05d   %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", start, l, lv, h, hv, e, distance(start, stop));
 
 		start--;
 	}
@@ -793,13 +793,13 @@ static uint16_t probe_left(uint16_t start) {
 }
 
 static uint16_t probe_right(uint16_t start) {
+	uint16_t stop = streampointer;
 	uint8_t l, h, lv, hv;
 	int e = 0; // floating error counter
 
 	if (rfcfg->verbose)
-		printf("DECODER probe        ►  {%2d,%2d} L      {%2d,%2d} H\n", lsymbols[0], lsymbols[1], hsymbols[0], hsymbols[1]);
+		printf("DECODER probe  [%05u]  {%2d,%2d} L      {%2d,%2d} H\n", stop, lsymbols[0], lsymbols[1], hsymbols[0], hsymbols[1]);
 
-	uint16_t stop = streampointer;
 	while (start != stop) {
 		l = lstream[start];
 		h = hstream[start];
@@ -829,11 +829,11 @@ static uint16_t probe_right(uint16_t start) {
 
 		// reached EOT
 		if (e >= UINT8_MAX - 10) {
-			printf("DECODER probe   %05d►| %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", start, l, lv, h, hv, e, distance(start, streampointer));
+			printf("DECODER probe   %05d►| %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", start, l, lv, h, hv, e, distance(start, stop));
 			break;
 		}
 
-		printf("DECODER probe   %05d►  %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", start, l, lv, h, hv, e, distance(start, streampointer));
+		printf("DECODER probe   %05d►  %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", start, l, lv, h, hv, e, distance(start, stop));
 
 		start++;
 	}
@@ -842,12 +842,12 @@ static uint16_t probe_right(uint16_t start) {
 
 // find begin and end of a signal by analyzing symbols
 static uint16_t probe(uint8_t *xstream, uint16_t start, uint16_t stop) {
-	uint16_t estart, estop, dist;
+	uint16_t estart, estopp, dist;
 
 	// this is crap
 	dist = distance(start, stop);
 	if (dist < 16 || dist > 2048)
-		return start;
+		return start + 4;
 
 	if (rfcfg->verbose)
 		printf("DECODER probing [%05u:%05u] %u samples\n", start, stop, dist);
@@ -859,74 +859,72 @@ static uint16_t probe(uint8_t *xstream, uint16_t start, uint16_t stop) {
 		printf("DECODER L=low stream, H=high stream, symbol(valid), E=error counter, D=distance to stream head\n");
 
 	// expand window to right - more reliable, then left - signal comes out of noise on that side
-	estop = probe_right(start + 4);
+	estopp = probe_right(start + 4);
 	estart = probe_left(start + 4);
 
 	// this is crap
-	dist = distance(estart, estop);
+	dist = distance(estart, estopp);
 	if (dist < 16 || dist > 2048)
-		return stop;
+		return start + 4;
 
 	if (rfcfg->verbose)
-		printf("DECODER probe window  [%05u:%05u] %u samples\n", estart, estop, dist);
+		printf("DECODER probe window  [%05u:%05u] %u samples\n", estart, estopp, dist);
 
 	// filter, sort and align symbol tables
 	filter();
 
 	// melt small L+H spikes into next L - if we do it initially on lsamples/hsamples its hard to do the probe_left
-	melt(estart, estop);
-	melt_condense(estart, estop);
-	while (!lstream[estart] && !hstream[estart] && estart != estop) // adjust start
+	melt(estart, estopp);
+	melt_condense(estart, estopp);
+	while (!lstream[estart] && !hstream[estart] && estart != estopp) // adjust start
 		estart++;
 
 	// this is again crap
-	dist = distance(estart, estop);
+	dist = distance(estart, estopp);
 	if (dist < 16 || dist > 2048)
-		return stop;
+		return start + 4;
 
 	if (rfcfg->verbose)
-		printf("DECODER after melting [%05u:%05u] %u samples\n", estart, estop, dist);
+		printf("DECODER after melting [%05u:%05u] %u samples\n", estart, estopp, dist);
 
 	// fine tune right edge of window
-	estop -= 8;
-	while (tune(estop, 3, R))
-		estop++;
-	estop--;
+	estopp -= 8;
+	while (tune(estopp, 3, R))
+		estopp++;
 
 	// fine tune left edge of window
 	estart += 16;
 	while (tune(estart, 3, L))
 		estart--;
-	estart++;
 
 	// this is again crap
-	dist = distance(estart, estop);
+	dist = distance(estart, estopp);
 	if (dist < 16 || dist > 2048)
-		return stop;
+		return start + 4;
 
 	// EOT - the receiver is adjusting it's sensitivity back to noise level
 	// estimate signal strength from time to next l+h samples
-	uint8_t ln = lstream[estop + 1], hn = hstream[estop + 1];
-	uint16_t lsn = lsamples[estop + 1], hsn = hsamples[estop + 1];
+	uint8_t ln = lstream[estopp + 1], hn = hstream[estopp + 1];
+	uint16_t lsn = lsamples[estopp + 1], hsn = hsamples[estopp + 1];
 	uint32_t strenth = (lsn + hsn) * 100 / (UINT16_MAX * 2);
 
 	if (rfcfg->verbose)
-		printf("DECODER tuned  [%05u:%05u] %u samples, signal %u%% estimated from L+1 %d(%05u) H+1 %d(%05u) after EOT\n", estart, estop, dist, strenth, ln, lsn, hn, hsn);
+		printf("DECODER tuned  [%05u:%05u] %u samples, signal %u%% estimated from L+1 %d(%05u) H+1 %d(%05u) after EOT\n", estart, estopp, dist, strenth, ln, lsn, hn, hsn);
 
 	// symbol soft error correction
-	iron(lstream, estart, estop);
-	iron(hstream, estart, estop);
+	iron(lstream, estart, estopp);
+	iron(hstream, estart, estopp);
 
 	// symbol hard error correction
-	hammer(estart, estop);
+	hammer(estart, estopp);
 
 	// consume this stream window
-	eat(estart, estop);
+	eat(estart, estopp);
 
 	// avoid re-catching this code
-	clear_streams(estart, estop);
+	clear_streams(estart, estopp);
 
-	return estop;
+	return estopp;
 }
 
 // round pulse length to multiples of 100 and divide by 100
@@ -1095,7 +1093,6 @@ void* stream_decoder(void *arg) {
 
 			// detailed symbol analyzing
 			start = probe(xstream, p1, p2);
-			start += 4;
 			ok = distance(start, stop) > 8;
 		}
 
