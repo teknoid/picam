@@ -78,11 +78,11 @@ static uint16_t distance(uint16_t start, uint16_t stop) {
 
 // clears both streams between the positions
 static void clear_streams(uint16_t start, uint16_t stop) {
-	while (start != stop) {
+	do {
 		lstream[start] = 0;
 		hstream[start] = 0;
-		start++;
-	}
+	} while (++start != stop);
+
 }
 
 static void dump_stream(uint8_t *xstream, uint16_t start, uint16_t stopp, int overhead) {
@@ -296,9 +296,11 @@ static void find_sync(uint8_t *xstream, uint16_t start, uint16_t stop, uint8_t *
 		} while (p++ != stop && j < SYMBOLS);
 
 		// convert positions into code bit lengths
-		for (int x = 1; x < SYMBOLS; x++)
-			if (positions[x])
-				positions[x - 1] = distance(positions[x - 1], positions[x]) - 2;
+		for (int x = 0; x < SYMBOLS - 1; x++)
+			if (positions[x + 1])
+				positions[x] = distance(positions[x], positions[x + 1]) - 2;
+			else
+				positions[x] = 0;
 
 		if (positions[0] < 8 || positions[1] < 8 || positions[2] < 8)
 			continue;
@@ -363,8 +365,7 @@ static void eat(uint16_t start, uint16_t stop) {
 		matrix_store(P_NEXUS, code);
 
 		// next after sync
-		start++;
-	} while (start != stop);
+	} while (++start != stop);
 }
 
 // returns the best matching symbol for given distance
@@ -592,7 +593,7 @@ static void melt(uint16_t start, uint16_t stop) {
 	uint8_t d, dmin = lsymbols[0] < lsymbols[1] ? lsymbols[0] : lsymbols[1];
 
 	// melt and create a gap
-	while (start != stop) {
+	do {
 		d = lstream[start] + hstream[start];
 		if (d <= dmin) {
 			dump(start, start, 4);
@@ -606,8 +607,7 @@ static void melt(uint16_t start, uint16_t stop) {
 			dump(start, start, 4);
 			printf("\n");
 		}
-		start++;
-	}
+	} while (++start != stop);
 }
 
 // soft ironing stream up to minimum symbol distance
@@ -660,7 +660,7 @@ static void hammer(uint16_t start, uint16_t stop) {
 	}
 
 	int invalid = 0;
-	while (start != stop) {
+	do {
 		l = lstream[start];
 		h = hstream[start];
 
@@ -681,9 +681,7 @@ static void hammer(uint16_t start, uint16_t stop) {
 				// TODO - an dieser stelle wurde der Empfang durch ein zu langes H unterbrochen - das sind genau die fehlenden bits
 			}
 		}
-
-		start++;
-	}
+	} while (++start != stop);
 
 	if (rfcfg->verbose) {
 		attroff();
@@ -746,7 +744,7 @@ static uint16_t probe_left(uint16_t start) {
 
 	printf("DECODER probe  [%05u]  {%2d,%2d} L      {%2d,%2d} H   %3d Ex\n", stop, lmin, lmax, hmin, hmax, ex);
 
-	while (start != stop) {
+	do {
 		l = lstream[start];
 		h = hstream[start];
 
@@ -787,8 +785,8 @@ static uint16_t probe_left(uint16_t start) {
 
 		printf("DECODER probe  ◄%05d   %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", start, l, lv, h, hv, e, distance(start, stop));
 
-		start--;
-	}
+	} while (--start != stop);
+
 	return start;
 }
 
@@ -800,7 +798,7 @@ static uint16_t probe_right(uint16_t start) {
 	if (rfcfg->verbose)
 		printf("DECODER probe  [%05u]  {%2d,%2d} L      {%2d,%2d} H\n", stop, lsymbols[0], lsymbols[1], hsymbols[0], hsymbols[1]);
 
-	while (start != stop) {
+	do {
 		l = lstream[start];
 		h = hstream[start];
 
@@ -835,8 +833,8 @@ static uint16_t probe_right(uint16_t start) {
 
 		printf("DECODER probe   %05d►  %3d(%2d) L      %3d(%2d) H   %3d E   %05d D\n", start, l, lv, h, hv, e, distance(start, stop));
 
-		start++;
-	}
+	} while (++start != stop);
+
 	return start;
 }
 
@@ -932,7 +930,7 @@ static void scale(uint16_t start, uint16_t stop) {
 	uint16_t sl, sh, smax = UINT8_MAX * 100;
 	uint8_t l, h;
 
-	while (start != stop) {
+	do {
 		sl = lsamples[start];
 		sh = hsamples[start];
 
@@ -955,8 +953,7 @@ static void scale(uint16_t start, uint16_t stop) {
 		lstream[start] = l;
 		hstream[start] = h;
 
-		start++;
-	}
+	} while (++start != stop);
 }
 
 // dumb 4-block symbol pattern matching - return the most smallest matching symbol
@@ -1048,7 +1045,7 @@ void* stream_decoder(void *arg) {
 		xstream = hstream;
 
 	// decoder main loop: pause, then decode block
-	uint16_t p1, p2, start = 0, stop = 0;
+	uint16_t p1, p2, start = 0, stopp = 0, d1, d2;
 	while (1) {
 		msleep(rfcfg->decoder_delay);
 
@@ -1057,13 +1054,13 @@ void* stream_decoder(void *arg) {
 			msleep(100);
 
 		// this is the block we have to analyze in this round
-		stop = streampointer;
+		stopp = streampointer;
 
 		if (rfcfg->verbose)
-			printf("DECODER analyzing [%05u:%05u] %u samples\n", start, stop, distance(start, stop));
+			printf("DECODER analyzing [%05u:%05u] %u samples\n", start, stopp, distance(start, stopp));
 
 		// shrink samples to max 256 symbols
-		scale(start, stop);
+		scale(start, stopp);
 
 		// pattern sniffer loop
 		int ok = 1;
@@ -1072,7 +1069,7 @@ void* stream_decoder(void *arg) {
 			// catch pattern by jumping 4-block-wise
 			while (ok && !sniff(xstream, start)) {
 				start += 4;
-				ok = distance(start, stop) > 8;
+				ok = distance(start, stopp) > 8;
 			}
 
 			if (!ok)
@@ -1083,7 +1080,7 @@ void* stream_decoder(void *arg) {
 			// jump forward till no match anymore
 			while (ok && sniff(xstream, start)) {
 				start += 4;
-				ok = distance(start, stop) > 8;
+				ok = distance(start, stopp) > 8;
 			}
 
 			if (!ok)
@@ -1093,7 +1090,19 @@ void* stream_decoder(void *arg) {
 
 			// detailed symbol analyzing
 			start = probe(xstream, p1, p2);
-			ok = distance(start, stop) > 8;
+
+			// distance can only shrink, otherwise start overrun the stop position
+			d1 = distance(p1, stopp);
+			d2 = distance(p1, start);
+			if (d2 > d1) {
+				if (rfcfg->verbose)
+					printf("DECODER detected STOP overrun [%05u:%05u:%05u] SP=%05u\n", p1, start, stopp, streampointer);
+				start = streampointer;
+				break;
+			}
+
+			// still samples available?
+			ok = distance(start, stopp) > 8;
 		}
 
 		matrix_decode();

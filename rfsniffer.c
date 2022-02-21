@@ -119,6 +119,9 @@ static int rfsniffer_main(int argc, char **argv) {
 	if (gpio_init() < 0)
 		return -1;
 
+	// disable stdout buffering
+	setvbuf(stdout, NULL, _IONBF, 0);
+
 	// initialize a default configuration
 	rfcfg = rfsniffer_default_config();
 
