@@ -111,22 +111,20 @@ static void dump_stream(uint8_t *xstream, uint16_t start, uint16_t stopp, int ov
 
 		p = xstart;
 		printf("%c ", xstream == lstream ? L : H);
-		while (p != skip1) {
+		do {
 			if (p == start)
 				green();
 			printf("%3d", xstream[p]);
-			p++;
-		}
+		} while (++p != skip1);
 
 		printf("  ...");
 
 		p = skip2;
-		while (p != xstopp) {
+		do {
 			printf("%3d", xstream[p]);
 			if (p == stopp)
 				attroff();
-			p++;
-		}
+		} while (++p != xstopp);
 		printf("\n");
 
 	} else {
@@ -134,19 +132,20 @@ static void dump_stream(uint8_t *xstream, uint16_t start, uint16_t stopp, int ov
 		// all fit to screen
 		p = xstart;
 		printf("%c ", xstream == lstream ? L : H);
-		while (p != xstopp) {
+		do {
 			if (p == start)
 				green();
 			printf("%3d", xstream[p]);
 			if (p == stopp)
 				attroff();
-			p++;
-		}
+		} while (++p != xstopp);
 		printf("\n");
 	}
 }
 
 static void dump(uint16_t start, uint16_t stop, int overhead) {
+	if (start == stop)
+		return;
 	printf("DECODER dump [%05u:%05u] %u samples\n", start, stop, distance(start, stop));
 	dump_stream(hstream, start, stop, overhead);
 	dump_stream(lstream, start, stop, overhead);
@@ -293,7 +292,7 @@ static void find_sync(uint8_t *xstream, uint16_t start, uint16_t stop, uint8_t *
 		do {
 			p = find(xstream, p, stop, s);
 			positions[j++] = p;
-		} while (p++ != stop && j < SYMBOLS);
+		} while (++p != stop && j < SYMBOLS);
 
 		// convert positions into code bit lengths
 		for (int x = 0; x < SYMBOLS - 1; x++)
@@ -354,14 +353,14 @@ static void eat(uint16_t start, uint16_t stop) {
 		if (!count++) {
 			dump(start - dist, start - 1, 2);
 			code = decode_low(start - dist, dist);
-			printf("%s\n", printbits64(code, 0x1011001101));
+//			printf("%s\n", printbits64(code, 0x1011001101));
 			matrix_store(P_NEXUS, code);
 		}
 
 		// the code after the sync
 		dump(start + 1, start + dist, 2);
 		code = decode_low(start + 1, dist);
-		printf("%s\n", printbits64(code, 0x1011001101));
+//		printf("%s\n", printbits64(code, 0x1011001101));
 		matrix_store(P_NEXUS, code);
 
 		// next after sync
@@ -468,9 +467,9 @@ static void learn(uint8_t *xsymbols, uint8_t s, const char direction) {
 // move all symbols to the left without gaps between
 static void condense(uint8_t *xsymbols) {
 	uint16_t *xcounter = select_counter(xsymbols);
+	int repeat;
 
-	int repeat = 1;
-	while (repeat) {
+	do {
 		repeat = 0;
 		for (int i = 0; i < (SYMBOLS - 1); i++)
 			if (!xsymbols[i] && xsymbols[i + 1]) {
@@ -480,16 +479,16 @@ static void condense(uint8_t *xsymbols) {
 				xcounter[i + 1] = 0;
 				repeat = 1;
 			}
-	}
+	} while (repeat);
 }
 
 // sort by highest occurrence
 static void sort(uint8_t *xsymbols) {
 	uint16_t c, *xcounter = select_counter(xsymbols);
 	uint8_t s;
+	int repeat;
 
-	int repeat = 1;
-	while (repeat) {
+	do {
 		repeat = 0;
 		for (int i = 0; i < (SYMBOLS - 1); i++)
 			if (xcounter[i + 1] > xcounter[i]) {
@@ -501,7 +500,7 @@ static void sort(uint8_t *xsymbols) {
 				xsymbols[i + 1] = s;
 				repeat = 1;
 			}
-	}
+	} while (repeat);
 }
 
 // straighten symbols
@@ -570,22 +569,20 @@ static void filter() {
 
 // move the stream to the right without gaps between
 static void melt_condense(uint16_t start, uint16_t stop) {
-	while (stop != start) {
+	do {
 		uint16_t available = distance(start, stop);
 		while (available-- && !lstream[stop] && !hstream[stop]) {
 			uint16_t p = stop;
-			while (p != start) {
+			do {
 				// close the gap
 				lstream[p] = lstream[p - 1];
 				hstream[p] = hstream[p - 1];
-				p--;
-			}
+			} while (--p != start);
 			// create a gap at the beginning
 			lstream[start] = 0;
 			hstream[start] = 0;
 		}
-		stop--;
-	}
+	} while (--stop != start);
 }
 
 // melt small spikes (L0, L1, ...) into next L symbol
@@ -621,7 +618,7 @@ static void iron(uint8_t *xstream, uint16_t start, uint16_t stop) {
 
 		uint16_t p = start;
 		int fixed = 0;
-		while (p != stop) {
+		do {
 			s = xstream[p];
 			m = match(xsymbols, s, i);
 			if (s && m && s != m) {
@@ -630,8 +627,7 @@ static void iron(uint8_t *xstream, uint16_t start, uint16_t stop) {
 				xstream[p] = m;
 				fixed++;
 			}
-			p++;
-		}
+		} while (++p != stop);
 
 		if (rfcfg->verbose) {
 			printf("\n");
