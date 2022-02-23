@@ -86,8 +86,11 @@ static void clear_streams(uint16_t start, uint16_t stop) {
 }
 
 static void dump_stream(uint8_t *xstream, uint16_t start, uint16_t stopp, int overhead) {
+	uint16_t xstart = start - overhead;
+	uint16_t xstopp = stopp + overhead + 1;
 	uint16_t p;
 	int cols = 80;
+	int places = cols / 3 - 5;
 
 #ifdef TIOCGSIZE
     struct ttysize ts;
@@ -99,15 +102,11 @@ static void dump_stream(uint8_t *xstream, uint16_t start, uint16_t stopp, int ov
 	cols = ts.ws_col;
 #endif
 
-	int xstart = start - overhead;
-	int xstopp = stopp + overhead + 1;
-	int places = cols / 3 - 5;
-
 	if (distance(xstart, xstopp) > places) {
 
 		// screen to small - skip stream in the middle
-		int skip1 = xstart + places / 2;
-		int skip2 = xstopp - places / 2;
+		uint16_t skip1 = xstart + places / 2;
+		uint16_t skip2 = xstopp - places / 2;
 
 		p = xstart;
 		printf("%c ", xstream == lstream ? L : H);
@@ -144,8 +143,6 @@ static void dump_stream(uint8_t *xstream, uint16_t start, uint16_t stopp, int ov
 }
 
 static void dump(uint16_t start, uint16_t stop, int overhead) {
-	if (start == stop)
-		return;
 	printf("DECODER dump [%05u:%05u] %u samples\n", start, stop, distance(start, stop));
 	dump_stream(hstream, start, stop, overhead);
 	dump_stream(lstream, start, stop, overhead);
