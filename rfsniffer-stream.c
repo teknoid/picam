@@ -89,9 +89,8 @@ static void dump_stream(uint8_t *xstream, uint16_t start, uint16_t stopp, int ov
 	uint16_t xstart = start - overhead;
 	uint16_t xstopp = stopp + overhead + 1;
 	uint16_t p;
-	int cols = 80;
-	int places = cols / 3 - 5;
 
+	int cols = 80;
 #ifdef TIOCGSIZE
     struct ttysize ts;
     ioctl(STDIN_FILENO, TIOCGSIZE, &ts);
@@ -101,6 +100,7 @@ static void dump_stream(uint8_t *xstream, uint16_t start, uint16_t stopp, int ov
 	ioctl(STDIN_FILENO, TIOCGWINSZ, &ts);
 	cols = ts.ws_col;
 #endif
+	int places = cols / 3 - 5;
 
 	if (distance(xstart, xstopp) > places) {
 
