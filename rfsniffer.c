@@ -113,6 +113,12 @@ void rfsniffer_test(int argc, char **argv) {
 	printf("test uint overflow MAX +8 %05u\n", test);
 
 	rfcodec_test(argc, argv);
+
+	if (rfcfg->stream_mode)
+		rfsniffer_stream_test(argc, argv);
+
+	if (rfcfg->realtime_mode)
+		rfsniffer_realtime_test(argc, argv);
 }
 
 static int rfsniffer_main(int argc, char **argv) {

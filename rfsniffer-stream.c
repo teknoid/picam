@@ -82,7 +82,6 @@ static void clear_streams(uint16_t start, uint16_t stop) {
 		lstream[start] = 0;
 		hstream[start] = 0;
 	} while (++start != stop);
-
 }
 
 static void dump_stream(uint8_t *xstream, uint16_t start, uint16_t stopp, int overhead) {
@@ -143,7 +142,7 @@ static void dump_stream(uint8_t *xstream, uint16_t start, uint16_t stopp, int ov
 }
 
 static void dump(uint16_t start, uint16_t stop, int overhead) {
-	printf("DECODER dump [%05u:%05u] %u samples\n", start, stop, distance(start, stop));
+	printf("DECODER dump [%05u:%05u] samples=%u overhead=%u\n", start, stop, distance(start, stop), overhead);
 	dump_stream(hstream, start, stop, overhead);
 	dump_stream(lstream, start, stop, overhead);
 }
@@ -242,7 +241,7 @@ static uint64_t decode_low(uint16_t pos, int bits) {
 	for (int i = 0; i < bits; i++) {
 		code <<= 1;
 		uint8_t l = lstream[pos++];
-		if (l != UINT8_MAX && l > div)
+		if (l > div)
 			code++;
 	}
 	return code;
@@ -260,16 +259,18 @@ static uint64_t decode_high(uint16_t pos, uint8_t bits) {
 	for (int i = 0; i < bits; i++) {
 		code <<= 1;
 		uint8_t h = hstream[pos];
-		if (h != UINT8_MAX && h > div)
+		if (h > div)
 			code++;
 	}
 	return code;
 }
 
 static uint16_t find(uint8_t *xstream, uint16_t start, uint16_t stop, uint8_t s) {
-	while (start != stop && s != xstream[start])
-		start++;
-	return start;
+	do {
+		if (s == xstream[start])
+			return start;
+	} while (++start != stop);
+	return stop;
 }
 
 // find the SYNC symbol - min 3 repeats with identical distances > 8
@@ -278,25 +279,25 @@ static void find_sync(uint8_t *xstream, uint16_t start, uint16_t stop, uint8_t *
 	uint8_t s, *xsymbols = select_symbols(xstream);
 
 	for (int i = 0; i < SYMBOLS; i++) {
-		memset(positions, 0, SYMBOLS * sizeof(uint16_t));
-
 		s = xsymbols[i];
 		if (!s)
 			break;
 
-		int j = 0;
 		p = start;
-		do {
+		memset(positions, 0, SYMBOLS * sizeof(uint16_t));
+		for (int j = 0; j < SYMBOLS; j++) {
 			p = find(xstream, p, stop, s);
-			positions[j++] = p;
-		} while (++p != stop && j < SYMBOLS);
+			if (p == stop)
+				break;
+			positions[j] = p++;
+		}
 
 		// convert positions into code bit lengths
-		for (int x = 0; x < SYMBOLS - 1; x++)
-			if (positions[x + 1])
-				positions[x] = distance(positions[x], positions[x + 1]) - 2;
+		for (int j = 0; j < SYMBOLS - 1; j++)
+			if (positions[j + 1])
+				positions[j] = distance(positions[j], positions[j + 1]) - 2;
 			else
-				positions[x] = 0;
+				positions[j] = 0;
 
 		if (positions[0] < 8 || positions[1] < 8 || positions[2] < 8)
 			continue;
@@ -310,15 +311,15 @@ static void find_sync(uint8_t *xstream, uint16_t start, uint16_t stop, uint8_t *
 		}
 
 		// find at least 3 identical distances
-		for (int x = 0; x < SYMBOLS; x++) {
-			if (!positions[x])
+		for (int j = 0; j < SYMBOLS; j++) {
+			if (!positions[j])
 				break;
 			int identical = 0;
-			for (int y = x + 1; y < SYMBOLS; y++)
-				identical += positions[x] == positions[y];
+			for (int y = j + 1; y < SYMBOLS; y++)
+				identical += positions[j] == positions[y];
 			if (identical == 3) {
 				*sync = s;
-				*dist = positions[x];
+				*dist = positions[j];
 				return;
 			}
 		}
@@ -335,6 +336,8 @@ static void eat(uint16_t start, uint16_t stop) {
 		dump(start, stop, 16);
 
 	find_sync(lstream, start, stop, &sync, &dist);
+//	sync = 39;
+//	dist = 36;
 	if (!sync)
 		return;
 
@@ -544,7 +547,7 @@ static void align(uint8_t *xsymbols) {
 }
 
 // remove symbols below minimum occurrence
-static void filter() {
+static void filter(uint16_t samples) {
 	if (rfcfg->verbose)
 		dump_tables("symbol tables ");
 
@@ -560,8 +563,55 @@ static void filter() {
 	align(lsymbols);
 	align(hsymbols);
 
+	// calculate percentage for the first three symbols
+	int h0 = hcounter[0] * 100 / samples;
+	int h1 = hcounter[1] * 100 / samples;
+	int h2 = hcounter[2] * 100 / samples;
+	int l0 = lcounter[0] * 100 / samples;
+	int l1 = lcounter[1] * 100 / samples;
+	int l2 = lcounter[2] * 100 / samples;
+	if (rfcfg->verbose)
+		printf("DECODER percentages    H0=%d%% H1=%d%% H2=%d%%   L0=%d%% L1=%d%% L2=%d%%\n", h0, h1, h2, l0, l1, l2);
+
+	// if H0 > 90% then assuming it's the only valid one, so delete all others
+	if (h0 > 90)
+		for (int i = 1; i < SYMBOLS; i++)
+			hsymbols[i] = 0;
+
 	if (rfcfg->verbose)
 		dump_tables("after filter  ");
+}
+
+// equalize H and next L symbol mismatches with given tolerance
+static void equalize(uint16_t start, uint16_t stop, int dist, int tol) {
+	uint16_t p = start;
+	uint8_t l, h;
+	int ld, hd, fixed = 0;
+
+	if (rfcfg->verbose)
+		printf("DECODER equalize d=%d t=%d   ", dist, tol);
+
+	do {
+		h = hstream[p];
+		l = lstream[p + 1];
+		hd = h - match(hsymbols, h, dist);
+		ld = l - match(lsymbols, l, dist);
+		if (hd && ld && (hd + ld == tol)) {
+			if (rfcfg->verbose)
+				printf("H%dL%d", h, l);
+			hstream[p] += ld;
+			lstream[p + 1] += hd;
+			if (rfcfg->verbose)
+				printf("->H%dL%d ", hstream[p], lstream[p + 1]);
+			fixed++;
+		}
+	} while (++p != stop);
+
+	if (rfcfg->verbose) {
+		printf("\n");
+//		if (!fixed)
+//			clearline();
+	}
 }
 
 // move the stream to the right without gaps between
@@ -584,24 +634,27 @@ static void melt_condense(uint16_t start, uint16_t stop) {
 
 // melt small spikes (L0, L1, ...) into next L symbol
 static void melt(uint16_t start, uint16_t stop) {
-	uint8_t d, dmin = lsymbols[0] < lsymbols[1] ? lsymbols[0] : lsymbols[1];
+	int melted = 0;
 
-	// melt and create a gap
+	if (rfcfg->verbose)
+		printf("DECODER melt ");
+
 	do {
-		d = lstream[start] + hstream[start];
-		if (d <= dmin) {
-			dump(start, start, 4);
+		if (lstream[start] < 2) {
 			if (rfcfg->verbose)
-				printf("DECODER %05d melting %d + %d -> %d\n", start, lstream[start], hstream[start], lstream[start + 1]);
-			// melt
-			lstream[start + 1] += d;
-			// create a gap
+				printf("L%d+H%d->L%d ", lstream[start], hstream[start], lstream[start + 1]);
+			lstream[start + 1] += lstream[start] + hstream[start];
 			lstream[start] = 0;
 			hstream[start] = 0;
-			dump(start, start, 4);
-			printf("\n");
+			melted = 1;
 		}
 	} while (++start != stop);
+
+	if (rfcfg->verbose) {
+		printf("\n");
+		if (!melted)
+			clearline();
+	}
 }
 
 // soft ironing stream up to minimum symbol distance
@@ -862,7 +915,11 @@ static uint16_t probe(uint8_t *xstream, uint16_t start, uint16_t stop) {
 		printf("DECODER probe window  [%05u:%05u] %u samples\n", estart, estopp, dist);
 
 	// filter, sort and align symbol tables
-	filter();
+	filter(dist);
+
+	// equalize L+H mismatches with zero tolerance
+	for (int i = 0; i < hsymbols[0]; i++)
+		equalize(estart, estopp, i, 0);
 
 	// melt small L+H spikes into next L - if we do it initially on lsamples/hsamples its hard to do the probe_left
 	melt(estart, estopp);
@@ -870,13 +927,14 @@ static uint16_t probe(uint8_t *xstream, uint16_t start, uint16_t stop) {
 	while (!lstream[estart] && !hstream[estart] && estart != estopp) // adjust start
 		estart++;
 
-	// this is again crap
-	dist = distance(estart, estopp);
-	if (dist < 16 || dist > 2048)
-		return start + 4;
-
 	if (rfcfg->verbose)
 		printf("DECODER after melting [%05u:%05u] %u samples\n", estart, estopp, dist);
+
+	// equalize again, first zero tolerance, then max +-1
+	for (int i = 0; i < hsymbols[0]; i++)
+		equalize(estart, estopp, i, 0);
+	for (int i = 0; i < hsymbols[0]; i++)
+		equalize(estart, estopp, i, 1);
 
 	// fine tune right edge of window
 	estopp -= 8;
@@ -895,8 +953,8 @@ static uint16_t probe(uint8_t *xstream, uint16_t start, uint16_t stop) {
 
 	// EOT - the receiver is adjusting it's sensitivity back to noise level
 	// estimate signal strength from time to next l+h samples
-	uint8_t ln = lstream[estopp + 1], hn = hstream[estopp + 1];
-	uint16_t lsn = lsamples[estopp + 1], hsn = hsamples[estopp + 1];
+	uint8_t ln = lstream[estopp], hn = hstream[estopp];
+	uint16_t lsn = lsamples[estopp], hsn = hsamples[estopp];
 	uint32_t strenth = (lsn + hsn) * 100 / (UINT16_MAX * 2);
 
 	if (rfcfg->verbose)
@@ -1133,6 +1191,8 @@ void* stream_sampler(void *arg) {
 
 	// initialize stream
 	streampointer = 0;
+	memset(lstream, 0, UINT16_MAX * sizeof(uint8_t));
+	memset(hstream, 0, UINT16_MAX * sizeof(uint8_t));
 	last = gpio_micros();
 
 	// sampler main loop
@@ -1166,3 +1226,86 @@ void* stream_sampler(void *arg) {
 	}
 	return (void*) 0;
 }
+
+void rfsniffer_stream_test(int argc, char **argv) {
+	char *k, *v, *nd, *nl, *nh, *token, *line = NULL;
+	int x, samples, overhead;
+	size_t size = 0;
+	ssize_t ssize = 0;
+	uint16_t lptr, hptr;
+
+	streampointer = 0;
+	memset(lstream, 0, UINT16_MAX * sizeof(uint8_t));
+	memset(hstream, 0, UINT16_MAX * sizeof(uint8_t));
+
+	printf("Paste full decoder dumps here followed by an empty line or press Ctrl-c to abort:\n");
+	while (1) {
+		ssize = getline(&line, &size, stdin);
+		if (ssize == 1)
+			break;
+
+		switch (line[0]) {
+		case 'D':
+			token = strchr(line, ']') + 1;
+			while (*token == ' ')
+				token++;
+			while (1) {
+				nd = strchr(token, ' ');
+				if (nd)
+					*nd++ = 0;
+				k = strtok(token, "=");
+				v = strtok(NULL, "=");
+				if (k && !strcmp(k, "samples"))
+					samples = atoi(v);
+				if (k && !strcmp(k, "overhead"))
+					overhead = atoi(v);
+				if (!nd)
+					break;
+				token = nd;
+			}
+			lptr = hptr = streampointer;
+			break;
+
+		case 'H':
+			nh = strtok(line + 1, " ");
+			while (nh != NULL) {
+				x = atoi(nh);
+				if (x > 1000) {
+					hstream[hptr++] = (uint8_t) (x / 1000);
+					hstream[hptr++] = (uint8_t) (x % 1000);
+				} else
+					hstream[hptr++] = (uint8_t) x;
+				nh = strtok(NULL, " ");
+			}
+			break;
+
+		case 'L':
+			nl = strtok(line + 1, " ");
+			while (nl != NULL) {
+				x = atoi(nl);
+				if (x > 1000) {
+					lstream[lptr++] = (uint8_t) (x / 1000);
+					lstream[lptr++] = (uint8_t) (x % 1000);
+				} else
+					lstream[lptr++] = (uint8_t) x;
+				nl = strtok(NULL, " ");
+			}
+			break;
+		}
+		streampointer = lptr;
+	}
+	free(line);
+
+	uint8_t *xstream;
+	if (rfcfg->sample_on_0)
+		xstream = lstream;
+	else
+		xstream = hstream;
+
+	probe(xstream, 0, streampointer - 1);
+}
+
+// TODO
+// load + store lsamples, hsamples for repeat
+// -s store : after each suchssessfil eat()
+// -l load

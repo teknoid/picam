@@ -86,3 +86,6 @@ void matrix_init();
 void matrix_store(uint8_t x, uint64_t code);
 void matrix_decode();
 void matrix_decode_protocol(uint8_t x);
+
+void rfsniffer_stream_test(int argc, char **argv);
+void rfsniffer_realtime_test(int argc, char **argv);

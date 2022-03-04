@@ -312,3 +312,6 @@ void* realtime_sampler(void *arg) {
 	}
 	return (void*) 0;
 }
+
+void rfsniffer_realtime_test(int argc, char **argv) {
+}
