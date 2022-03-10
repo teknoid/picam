@@ -146,7 +146,8 @@ int flamingo_init() {
 	if (cfg == NULL)
 		cfg = rfsniffer_default_config();
 
-	// GPIO pin connected to 433MHz sender module
+	// GPIO pin connected to 433MHz receiver+sender module
+	gpio_configure(cfg->rx, 0, 0, 0);
 	gpio_configure(cfg->tx, 1, 0, 0);
 
 	return 0;

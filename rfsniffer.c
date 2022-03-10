@@ -35,8 +35,8 @@
 // #define TX				219
 
 // picam
-#define RX					"GPIO27"
-#define TX					"GPIO17"
+#define RX					"GPIO17"
+#define TX					"GPIO04"
 
 #define BUFFER				0xff
 
@@ -370,6 +370,10 @@ rfsniffer_config_t* rfsniffer_default_config() {
 int rfsniffer_init() {
 	if (gpio_init())
 		return -1;
+
+	// GPIO pin connected to 433MHz receiver+sender module
+	gpio_configure(rfcfg->rx, 0, 0, 0);
+	gpio_configure(rfcfg->tx, 1, 0, 0);
 
 	// initialize the matrix
 	matrix_init();
