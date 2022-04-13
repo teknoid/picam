@@ -124,7 +124,7 @@ static void init_bmp085() {
 	sensors->bmp085_mb = SWAP(i2c_smbus_read_word_data(fd, 0xBA));
 	sensors->bmp085_mc = SWAP(i2c_smbus_read_word_data(fd, 0xBC));
 	sensors->bmp085_md = SWAP(i2c_smbus_read_word_data(fd, 0xBE));
-	xlog("successfully read BMP085 calibration data");
+	xlog("read BMP085 calibration data");
 }
 
 static void collect() {

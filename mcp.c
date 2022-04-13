@@ -86,7 +86,7 @@ static void mcp_init() {
 	if (xmas_init() < 0)
 		exit(EXIT_FAILURE);
 
-	xlog("all modules successfully initialized");
+	xlog("all modules initialized");
 }
 
 static void mcp_close() {
@@ -97,7 +97,7 @@ static void mcp_close() {
 	rfsniffer_close();
 	flamingo_close();
 
-	xlog("all modules successfully closed");
+	xlog("all modules closed");
 }
 
 int main(int argc, char **argv) {
