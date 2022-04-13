@@ -127,11 +127,6 @@ static void init_bmp085() {
 	xlog("read BMP085 calibration data");
 }
 
-static void collect() {
-	read_bh1750();
-	read_bmp085();
-}
-
 static void write_sysfslike() {
 	char cvalue[8];
 
@@ -188,7 +183,8 @@ static void* sensors_loop(void *arg) {
 	}
 
 	while (1) {
-		collect();
+		read_bh1750();
+		read_bmp085();
 		write_sysfslike();
 		sleep(60);
 	}
@@ -200,7 +196,8 @@ int main(int argc, char **argv) {
 
 	int i = 100;
 	while (i-- > 0) {
-		collect();
+		read_bh1750();
+		read_bmp085();
 
 		printf("BH1750 raw  %d\n", sensors->bh1750_raw);
 		printf("BH1750 lux  %d lx\n", sensors->bh1750_lux);

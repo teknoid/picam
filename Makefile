@@ -38,14 +38,14 @@ flamingo-old: flamingo-old.c utils.o
 .PHONY: clean install install-service install-webcam
 
 clean:
-	rm -f *.o mcp mcp3204 flamingo rfsniffer gpio-bcm2835
+	rm -f *.o mcp sensors flamingo rfsniffer gpio-bcm2835
 
 install:
 	@echo "[Installing and starting mcp]"
 	systemctl stop mcp
 	install -m 0755 mcp /usr/local/bin
 	install -m 0755 flamingo /usr/local/bin
-	install -m 0755 mcp3204 /usr/local/bin
+	install -m 0755 sensors /usr/local/bin
 	install -m 0755 rfsniffer /usr/local/bin
 	systemctl start mcp
 
