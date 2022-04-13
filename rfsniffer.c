@@ -31,12 +31,16 @@
 #include "gpio.h"
 
 // odroid
-// #define RX				247
 // #define TX				219
+// #define RX				247
 
 // picam
-#define RX					"GPIO17"
-#define TX					"GPIO04"
+// #define TX				"GPIO04"
+// #define RX				"GPIO17"
+
+// pidev
+#define TX					"GPIO17"
+#define RX					"GPIO27"
 
 #define BUFFER				0xff
 

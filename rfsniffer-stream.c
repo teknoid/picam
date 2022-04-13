@@ -292,6 +292,10 @@ static void find_sync(uint8_t *xstream, uint16_t start, uint16_t stop, uint8_t *
 			positions[j] = p++;
 		}
 
+		for (int x = 1; x < SYMBOLS; x++)
+			if (positions[x])
+				dump(positions[x - 1], positions[x], 1);
+
 		// convert positions into code bit lengths
 		for (int j = 0; j < SYMBOLS - 1; j++)
 			if (positions[j + 1])
@@ -307,7 +311,7 @@ static void find_sync(uint8_t *xstream, uint16_t start, uint16_t stop, uint8_t *
 			for (int x = 0; x < SYMBOLS; x++)
 				if (positions[x])
 					printf("%d ", positions[x]);
-			printf("\n");
+			printf("\n\n");
 		}
 
 		// find at least 3 identical distances
@@ -922,13 +926,13 @@ static uint16_t probe(uint8_t *xstream, uint16_t start, uint16_t stop) {
 		equalize(estart, estopp, i, 0);
 
 	// melt small L+H spikes into next L - if we do it initially on lsamples/hsamples its hard to do the probe_left
-	melt(estart, estopp);
-	melt_condense(estart, estopp);
-	while (!lstream[estart] && !hstream[estart] && estart != estopp) // adjust start
-		estart++;
-
-	if (rfcfg->verbose)
-		printf("DECODER after melting [%05u:%05u] %u samples\n", estart, estopp, dist);
+//	melt(estart, estopp);
+//	melt_condense(estart, estopp);
+//	while (!lstream[estart] && !hstream[estart] && estart != estopp) // adjust start
+//		estart++;
+//
+//	if (rfcfg->verbose)
+//		printf("DECODER after melting [%05u:%05u] %u samples\n", estart, estopp, dist);
 
 	// equalize again, first zero tolerance, then max +-1
 	for (int i = 0; i < hsymbols[0]; i++)
@@ -955,10 +959,10 @@ static uint16_t probe(uint8_t *xstream, uint16_t start, uint16_t stop) {
 	// estimate signal strength from time to next l+h samples
 	uint8_t ln = lstream[estopp], hn = hstream[estopp];
 	uint16_t lsn = lsamples[estopp], hsn = hsamples[estopp];
-	uint32_t strenth = (lsn + hsn) * 100 / (UINT16_MAX * 2);
+	uint32_t strength = (lsn + hsn) * 100 / (UINT16_MAX * 2);
 
 	if (rfcfg->verbose)
-		printf("DECODER tuned  [%05u:%05u] %u samples, signal %u%% estimated from L+1 %d(%05u) H+1 %d(%05u) after EOT\n", estart, estopp, dist, strenth, ln, lsn, hn, hsn);
+		printf("DECODER tuned  [%05u:%05u] %u samples, signal %u%% estimated from L+1 %d(%05u) H+1 %d(%05u) after EOT\n", estart, estopp, dist, strength, ln, lsn, hn, hsn);
 
 	// symbol soft error correction
 	iron(lstream, estart, estopp);
@@ -1096,9 +1100,14 @@ void* stream_decoder(void *arg) {
 		xstream = hstream;
 
 	// decoder main loop: pause, then decode block
-	uint16_t p1, p2, start = 0, stopp = 0, d1, d2;
+	uint16_t p1, p2, start = 0, stopp = 0, d1, d2, dist;
 	while (1) {
 		msleep(rfcfg->decoder_delay);
+
+		// not enough samples available
+		dist = distance(start, streampointer);
+		if (dist < 16)
+			continue;
 
 		// wait if receiving in progress
 		while (receiving())
@@ -1108,7 +1117,7 @@ void* stream_decoder(void *arg) {
 		stopp = streampointer;
 
 		if (rfcfg->verbose)
-			printf("DECODER analyzing [%05u:%05u] %u samples\n", start, stopp, distance(start, stopp));
+			printf("DECODER analyzing [%05u:%05u] %u samples\n", start, stopp, dist);
 
 		// shrink samples to max 256 symbols
 		scale(start, stopp);

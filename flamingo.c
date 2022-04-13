@@ -27,8 +27,8 @@
 #include "rfcodec.h"
 #include "flamingo.h"
 
-#define RX	"GPIO27"
 #define TX	"GPIO17"
+#define RX	"GPIO27"
 
 static rfsniffer_config_t *cfg;
 
