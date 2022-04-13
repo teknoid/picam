@@ -10,10 +10,9 @@
 #include "utils.h"
 #include "rfsniffer.h"
 #include "flamingo.h"
-#include "mcp3204.h"
+#include "sensors.h"
 #include "webcam.h"
 #include "xmas.h"
-#include "lumi.h"
 #include "gpio.h"
 #include "mcp.h"
 
@@ -78,7 +77,7 @@ static void mcp_init() {
 	if (gpio_init() < 0)
 		exit(EXIT_FAILURE);
 
-	if (mcp3204_init() < 0)
+	if (sensors_init() < 0)
 		exit(EXIT_FAILURE);
 
 	if (webcam_init() < 0)
@@ -87,16 +86,13 @@ static void mcp_init() {
 	if (xmas_init() < 0)
 		exit(EXIT_FAILURE);
 
-	if (lumi_init() < 0)
-		exit(EXIT_FAILURE);
-
 	xlog("all modules successfully initialized");
 }
 
 static void mcp_close() {
-	lumi_close();
 	webcam_close();
 	xmas_close();
+	sensors_close();
 	gpio_close();
 	rfsniffer_close();
 	flamingo_close();

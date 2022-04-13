@@ -11,6 +11,7 @@ control wireless wall plugs and webcam by environment luminosity
 * read luminousity from illumination resistor connected to a MCP3204 A/D converter via SPI interface
 
 # News
+Mar 2022 new I2C sensors module for Luminance + Temperature + Barometer
 
 Jan 2021 implemented Flamingo 28bit Rolling Code enryption & decryption
 

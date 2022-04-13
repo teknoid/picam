@@ -4,7 +4,7 @@
 /.nfs*
 /mcp
 /flamingo
-/mcp3204
+/sensors
 /gpio-bcm2835
 /rfsniffer
 /build/

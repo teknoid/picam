@@ -10,10 +10,10 @@ typedef struct timing_t {
 } timing_t;
 
 // light on: ↑later ↓earlier
-#define XMAS_SUNDOWN	2500
+#define XMAS_SUNDOWN	50
 
 // light off: ↑earlier, ↓later
-#define XMAS_SUNRISE	3000
+#define XMAS_SUNRISE	100
 
 // the remote control unit
 #define WHITE1				1

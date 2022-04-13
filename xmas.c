@@ -1,21 +1,22 @@
-#include <pthread.h>
+#include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <unistd.h>
-#include <sys/mman.h>
+#include <time.h>
+#include <pthread.h>
 
-#include "mcp3204.h"
 #include "flamingo.h"
+#include "sensors.h"
 #include "utils.h"
 #include "xmas.h"
 
 // TODO define channel status for each remote control unit
 static char channel_status[128];
 
-static pthread_t thread_xmas;
+static pthread_t xmas_thread;
 
-static void* xmas(void *arg);
+static void* xmas_loop(void *arg);
 
 static void send_on(const timing_t *timing) {
 	int index = timing->channel - 'A';
@@ -41,7 +42,6 @@ static void process(struct tm *now, const timing_t *timing) {
 	int from = timing->on_h * 60 + timing->on_m;
 	int to = timing->off_h * 60 + timing->off_m;
 	int on = channel_status[(int) timing->channel - 'A'];
-	int value;
 
 	if (from <= curr && curr <= to) {
 
@@ -50,9 +50,8 @@ static void process(struct tm *now, const timing_t *timing) {
 			if (afternoon) {
 				// evening: check if sundown is reached an switch on
 				// xlog("in ON time, waiting for XMAS_SUNDOWN");
-				value = mcp3204_read();
-				if (value > XMAS_SUNDOWN) {
-					xlog("reached XMAS_SUNDOWN at %d", value);
+				if (sensors->bh1750_raw < XMAS_SUNDOWN) {
+					xlog("reached XMAS_SUNDOWN at bh1750_raw=%d", sensors->bh1750_raw);
 					send_on(timing);
 				}
 			} else {
@@ -72,9 +71,8 @@ static void process(struct tm *now, const timing_t *timing) {
 			} else {
 				// morning: check if sunrise is reached an switch off
 				// xlog("in OFF time, waiting for XMAS_SUNRISE");
-				value = mcp3204_read();
-				if (value < XMAS_SUNRISE) {
-					xlog("reached XMAS_SUNRISE at %d", value);
+				if (sensors->bh1750_raw > XMAS_SUNRISE) {
+					xlog("reached XMAS_SUNRISE at bh1750_raw=%d", sensors->bh1750_raw);
 					send_off(timing);
 				}
 			}
@@ -84,29 +82,23 @@ static void process(struct tm *now, const timing_t *timing) {
 
 int xmas_init() {
 	ZERO(channel_status);
-	if (pthread_create(&thread_xmas, NULL, &xmas, NULL))
+	if (pthread_create(&xmas_thread, NULL, &xmas_loop, NULL))
 		xlog("Error creating thread");
 
 	return 0;
 }
 
 void xmas_close() {
-	if (pthread_cancel(thread_xmas))
+	if (pthread_cancel(xmas_thread))
 		xlog("Error canceling thread");
 
-	if (pthread_join(thread_xmas, NULL))
+	if (pthread_join(xmas_thread, NULL))
 		xlog("Error joining thread");
 }
 
-static void* xmas(void *arg) {
+static void* xmas_loop(void *arg) {
 	if (pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL)) {
 		xlog("Error setting pthread_setcancelstate");
-		return (void*) 0;
-	}
-
-	int value = mcp3204_read();
-	if (value == 0) {
-		xlog("mcp3204_read returned 0 ?");
 		return (void*) 0;
 	}
 

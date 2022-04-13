@@ -8,14 +8,14 @@ OBJS = $(SRCS:.c=.o)
 COBJS-COMMON	= utils.o
 COBJS-RFSNIFFER	= rfsniffer.o rfsniffer-stream.o rfsniffer-realtime.o rfcodec.o rfcodec-nexus.o rfcodec-flamingo.o 
 
-all: clean mcp mcp3204 flamingo rfsniffer gpio-bcm2835
+all: clean mcp sensors flamingo rfsniffer gpio-bcm2835
 
-mcp: mcp.o gpio-bcm2835.o lumi.o xmas.o mcp3204.o webcam.o flamingo.o frozen.o $(COBJS-COMMON) $(COBJS-RFSNIFFER)
-	$(CC) $(CFLAGS) -o mcp mcp.o gpio-bcm2835.o lumi.o xmas.o mcp3204.o webcam.o flamingo.o frozen.o $(COBJS-COMMON) $(COBJS-RFSNIFFER) $(LIBS)
+mcp: mcp.o gpio-bcm2835.o sensors.o xmas.o webcam.o flamingo.o frozen.o smbus.o $(COBJS-COMMON) $(COBJS-RFSNIFFER)
+	$(CC) $(CFLAGS) -o mcp mcp.o gpio-bcm2835.o sensors.o xmas.o webcam.o flamingo.o frozen.o smbus.o $(COBJS-COMMON) $(COBJS-RFSNIFFER) $(LIBS)
 
-mcp3204: mcp3204.o $(COBJS-COMMON)
-	$(CC) $(CFLAGS) -DMCP3204_MAIN -c mcp3204.c
-	$(CC) $(CFLAGS) -o mcp3204 mcp3204.o $(COBJS-COMMON) $(LIBS)
+sensors: sensors.o smbus.o $(COBJS-COMMON)
+	$(CC) $(CFLAGS) -DSENSORS_MAIN -c sensors.c smbus.c
+	$(CC) $(CFLAGS) -o sensors sensors.o smbus.o $(COBJS-COMMON) $(LIBS)
 
 flamingo: flamingo.o frozen.o gpio-bcm2835.o $(COBJS-COMMON) $(COBJS-RFSNIFFER)
 	$(CC) $(CFLAGS) -DFLAMINGO_MAIN -c flamingo.c
