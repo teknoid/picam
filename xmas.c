@@ -108,6 +108,9 @@ static void* xmas_loop(void *arg) {
 		return (void*) 0;
 	}
 
+	// wait on sensors first read
+	sleep(2);
+
 	while (1) {
 		time_t now_ts = time(NULL);
 		struct tm *now = localtime(&now_ts);
