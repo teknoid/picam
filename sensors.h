@@ -7,11 +7,12 @@
 #define BH1750_POWERDOWN	0x00
 #define BH1750_POWERON		0x01
 #define BH1750_RESET		0x07
-#define BH1750_CONTINUHIGH0	0x10
-#define BH1750_CONTINUHIGH1	0x11
-#define BH1750_CONTINULOW	0x13
-#define BH1750_ONETIMEHIGH	0x20
-#define BH1750_ONETIMELOW	0x23
+#define BH1750_CHM			0x10
+#define BH1750_CHM2			0x11
+#define BH1750_CLM			0x13
+#define BH1750_OTHM			0x20
+#define BH1750_OTHM2		0x21
+#define BH1750_OTLM			0x23
 
 #define BMP085				"BMP085"
 #define BMP085_ADDR			0x77
@@ -20,6 +21,7 @@
 typedef struct sensors_t {
 	// BH1750 luminousity
 	unsigned int bh1750_raw;
+	unsigned int bh1750_raw2;
 	unsigned int bh1750_lux;
 	unsigned int bh1750_prc;
 

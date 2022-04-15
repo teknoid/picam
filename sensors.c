@@ -35,25 +35,28 @@ static void read_bh1750() {
 	if (ioctl(fd, I2C_SLAVE, BH1750_ADDR) < 0)
 		return;
 
-	if (i2c_smbus_write_byte(fd, BH1750_POWERON) < 0)
-		return;
+	i2c_smbus_write_byte(fd, BH1750_POWERON);
 
-	if (i2c_smbus_write_byte(fd, BH1750_CONTINUHIGH0) < 0)
-		return;
-
-	msleep(150);
-
+	// read mode1 with resolution 1lx
+	i2c_smbus_write_byte(fd, BH1750_CHM);
+	msleep(180);
 	if (read(fd, buf, 2) != 2)
 		return;
-
-	if (i2c_smbus_write_byte(fd, BH1750_POWERDOWN) < 0)
-		return;
-
 	sensors->bh1750_raw = buf[0] << 8 | buf[1];
-	sensors->bh1750_lux = sensors->bh1750_raw / 1.2;
 
-	float f = (sqrt(sensors->bh1750_raw) * 100) / UINT8_MAX;
-	sensors->bh1750_prc = f < 1 ? 1 : f;
+	// read mode2 with resolution 0.5lx
+	i2c_smbus_write_byte(fd, BH1750_CHM2);
+	msleep(180);
+	if (read(fd, buf, 2) != 2)
+		return;
+	sensors->bh1750_raw2 = buf[0] << 8 | buf[1];
+
+	if (sensors->bh1750_raw2 == UINT16_MAX)
+		sensors->bh1750_lux = sensors->bh1750_raw / 1.2;
+	else
+		sensors->bh1750_lux = sensors->bh1750_raw2 / 2.4;
+
+	sensors->bh1750_prc = (sqrt(sensors->bh1750_raw) * 100) / UINT8_MAX;
 }
 
 // https://forums.raspberrypi.com/viewtopic.php?t=16968
@@ -73,11 +76,11 @@ static void read_bmp085() {
 	unsigned short int ac6 = sensors->bmp085_ac6;
 	short int b1 = sensors->bmp085_b1;
 	short int b2 = sensors->bmp085_b2;
-	// short int mb = sensors->bmp085_mb;
+// short int mb = sensors->bmp085_mb;
 	short int mc = sensors->bmp085_mc;
 	short int md = sensors->bmp085_md;
 
-	// temperature
+// temperature
 	i2c_smbus_write_byte_data(fd, 0xF4, 0x2E);
 	msleep(5);
 	sensors->bmp085_utemp = SWAP(i2c_smbus_read_word_data(fd, 0xF6));
@@ -86,7 +89,7 @@ static void read_bmp085() {
 	int b5 = x1 + x2;
 	sensors->bmp085_temp = ((b5 + 8) >> 4) / 10.0;
 
-	// pressure
+// pressure
 	i2c_smbus_write_byte_data(fd, 0xF4, 0x34 + (BMP085_OVERSAMPLE << 6));
 	msleep(2 + (3 << BMP085_OVERSAMPLE));
 	i2c_smbus_read_i2c_block_data(fd, 0xF6, 3, buf);
@@ -136,6 +139,9 @@ static void write_sysfslike() {
 	snprintf(cvalue, 6, "%u", sensors->bh1750_raw);
 	create_sysfslike(DIRECTORY, "lum_raw", cvalue, "%s", BH1750);
 
+	snprintf(cvalue, 6, "%u", sensors->bh1750_raw2);
+	create_sysfslike(DIRECTORY, "lum_raw2", cvalue, "%s", BH1750);
+
 	snprintf(cvalue, 6, "%u", sensors->bh1750_lux);
 	create_sysfslike(DIRECTORY, "lum_lux", cvalue, "%s", BH1750);
 
@@ -153,11 +159,11 @@ int sensors_init() {
 	sensors = malloc(sizeof(*sensors));
 	memset(sensors, 0, sizeof(*sensors));
 
-	// TODO config
+// TODO config
 	if ((fd = open(I2CBUS, O_RDWR)) < 0)
 		xlog("I2C BUS error");
 
-	// read BMP085 calibration data
+// read BMP085 calibration data
 	init_bmp085();
 
 #ifndef SENSORS_MAIN
@@ -197,22 +203,19 @@ static void* sensors_loop(void *arg) {
 int main(int argc, char **argv) {
 	sensors_init();
 
-	int i = 100;
-	while (i-- > 0) {
-		read_bh1750();
-		read_bmp085();
+	read_bh1750();
+	read_bmp085();
 
-		printf("BH1750 raw  %d\n", sensors->bh1750_raw);
-		printf("BH1750 lux  %d lx\n", sensors->bh1750_lux);
-		printf("BH1750 prc  %d %%\n", sensors->bh1750_prc);
+	printf("BH1750 raw  %d\n", sensors->bh1750_raw);
+	printf("BH1750 raw2 %d\n", sensors->bh1750_raw2);
+	printf("BH1750 lux  %d lx\n", sensors->bh1750_lux);
+	printf("BH1750 prc  %d %%\n", sensors->bh1750_prc);
 
-		printf("BMP085 temp %d (raw)\n", sensors->bmp085_utemp);
-		printf("BMP085 baro %d (raw)\n", sensors->bmp085_ubaro);
+	printf("BMP085 temp %d (raw)\n", sensors->bmp085_utemp);
+	printf("BMP085 baro %d (raw)\n", sensors->bmp085_ubaro);
 
-		printf("BMP085 temp %0.1f °C\n", sensors->bmp085_temp);
-		printf("BMP085 baro %0.1f hPa\n", sensors->bmp085_baro);
-		sleep(60);
-	}
+	printf("BMP085 temp %0.1f °C\n", sensors->bmp085_temp);
+	printf("BMP085 baro %0.1f hPa\n", sensors->bmp085_baro);
 	return 0;
 }
 #endif

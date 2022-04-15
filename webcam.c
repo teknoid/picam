@@ -72,7 +72,7 @@ static void* webcam_loop(void *arg) {
 	sleep(15);
 
 	// state unknown (e.g. system startup) --> check need for switching on
-	if (sensors->bh1750_raw > WEBCAM_SUNRISE)
+	if (sensors->bh1750_raw2 > WEBCAM_SUNRISE)
 		start();
 	else
 		stop();
@@ -85,8 +85,8 @@ static void* webcam_loop(void *arg) {
 		if (afternoon && webcam_on) {
 			// evening and on --> check if need to switch off
 			// xlog("awaiting WEBCAM_SUNDOWN at %i", value);
-			if (sensors->bh1750_raw < WEBCAM_SUNDOWN) {
-				xlog("reached WEBCAM_SUNDOWN at bh1750_raw=%d", sensors->bh1750_raw);
+			if (sensors->bh1750_raw2 < WEBCAM_SUNDOWN) {
+				xlog("reached WEBCAM_SUNDOWN at bh1750_raw2=%d", sensors->bh1750_raw2);
 				stop_timelapse();
 			}
 		}
@@ -94,8 +94,8 @@ static void* webcam_loop(void *arg) {
 		if (!afternoon && !webcam_on) {
 			// morning and off --> check if need to switch on
 			// xlog("awaiting WEBCAM_SUNRISE at %i", value);
-			if (sensors->bh1750_raw > WEBCAM_SUNRISE) {
-				xlog("reached WEBCAM_SUNRISE at bh1750_raw=%d", sensors->bh1750_raw);
+			if (sensors->bh1750_raw2 > WEBCAM_SUNRISE) {
+				xlog("reached WEBCAM_SUNRISE at bh1750_raw2=%d", sensors->bh1750_raw2);
 				start_reset();
 			}
 		}

@@ -50,8 +50,8 @@ static void process(struct tm *now, const timing_t *timing) {
 			if (afternoon) {
 				// evening: check if sundown is reached an switch on
 				// xlog("in ON time, waiting for XMAS_SUNDOWN");
-				if (sensors->bh1750_raw < XMAS_SUNDOWN) {
-					xlog("reached XMAS_SUNDOWN at bh1750_raw=%d", sensors->bh1750_raw);
+				if (sensors->bh1750_raw2 < XMAS_SUNDOWN) {
+					xlog("reached XMAS_SUNDOWN at bh1750_raw2=%d", sensors->bh1750_raw2);
 					send_on(timing);
 				}
 			} else {
@@ -71,8 +71,8 @@ static void process(struct tm *now, const timing_t *timing) {
 			} else {
 				// morning: check if sunrise is reached an switch off
 				// xlog("in OFF time, waiting for XMAS_SUNRISE");
-				if (sensors->bh1750_raw > XMAS_SUNRISE) {
-					xlog("reached XMAS_SUNRISE at bh1750_raw=%d", sensors->bh1750_raw);
+				if (sensors->bh1750_raw2 > XMAS_SUNRISE) {
+					xlog("reached XMAS_SUNRISE at bh1750_raw2=%d", sensors->bh1750_raw2);
 					send_off(timing);
 				}
 			}
