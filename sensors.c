@@ -35,21 +35,25 @@ static void read_bh1750() {
 	if (ioctl(fd, I2C_SLAVE, BH1750_ADDR) < 0)
 		return;
 
+	// powerup
 	i2c_smbus_write_byte(fd, BH1750_POWERON);
 
-	// read mode1 with resolution 1lx
+	// continuous high mode (resolution 1lx)
 	i2c_smbus_write_byte(fd, BH1750_CHM);
 	msleep(180);
 	if (read(fd, buf, 2) != 2)
 		return;
 	sensors->bh1750_raw = buf[0] << 8 | buf[1];
 
-	// read mode2 with resolution 0.5lx
+	// continuous high mode 2 (resolution 0.5lx)
 	i2c_smbus_write_byte(fd, BH1750_CHM2);
 	msleep(180);
 	if (read(fd, buf, 2) != 2)
 		return;
 	sensors->bh1750_raw2 = buf[0] << 8 | buf[1];
+
+	// sleep
+	i2c_smbus_write_byte(fd, BH1750_POWERDOWN);
 
 	if (sensors->bh1750_raw2 == UINT16_MAX)
 		sensors->bh1750_lux = sensors->bh1750_raw / 1.2;
