@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <math.h>
 #include <pthread.h>
 #include <sys/ioctl.h>
 #include <linux/i2c-dev.h>
@@ -50,7 +51,9 @@ static void read_bh1750() {
 
 	sensors->bh1750_raw = buf[0] << 8 | buf[1];
 	sensors->bh1750_lux = sensors->bh1750_raw / 1.2;
-	sensors->bh1750_prc = (sensors->bh1750_raw * 100) / UINT16_MAX;
+
+	float f = (sqrt(sensors->bh1750_raw) * 100) / UINT8_MAX;
+	sensors->bh1750_prc = f < 1 ? 1 : f;
 }
 
 // https://forums.raspberrypi.com/viewtopic.php?t=16968

@@ -1,6 +1,6 @@
 CFLAGS = -Wall
 
-LIBS = -lpthread -lrt
+LIBS = -lpthread -lrt -lm
 
 SRCS = $(wildcard *.c)
 OBJS = $(SRCS:.c=.o)
