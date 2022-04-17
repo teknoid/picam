@@ -58,10 +58,6 @@ v4l2-ctl -d $DEV --set-ctrl power_line_frequency=1
 sleep 1
 v4l2-ctl -d $DEV --set-ctrl backlight_compensation=0
 sleep 1
-v4l2-ctl -d $DEV --set-ctrl focus_auto=0
-sleep 1
-v4l2-ctl -d $DEV --set-ctrl focus_absolute=68
-sleep 1
 v4l2-ctl -d $DEV --set-ctrl exposure_auto=3
 sleep 1
 v4l2-ctl -d $DEV --set-ctrl exposure_auto_priority=0
@@ -71,4 +67,9 @@ sleep 1
 v4l2-ctl -d $DEV --set-ctrl white_balance_temperature_auto=0
 sleep 1
 v4l2-ctl -d $DEV --set-ctrl white_balance_temperature=6000
-
+sleep 1
+v4l2-ctl -d $DEV --set-ctrl focus_auto=1
+#sleep 1
+#v4l2-ctl -d $DEV --set-ctrl focus_auto=0
+#sleep 1
+#v4l2-ctl -d $DEV --set-ctrl focus_absolute=102

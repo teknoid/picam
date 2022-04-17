@@ -20,7 +20,7 @@ DFILE=$WORK/d/`printf %04d $DINDEX`.jpg
 cp $WORK/current.jpg $DFILE
 DINDEX=`expr $DINDEX + 1`
 echo $DINDEX > $WORK/d/.index
-echo `date +"%d.%m.%Y %X"` >$WORK/.mtime
+echo `LC_ALL=de_DE.utf8 date +"%d.%m.%Y %X"` >$WORK/.mtime
 
 # weekly: link image once per minute
 W=`expr $DINDEX % 6`

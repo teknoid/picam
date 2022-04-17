@@ -79,7 +79,7 @@ ul li a:hover {
 #humi {
 	position: absolute;
 	top: 10px;
-	left: 130px;
+	left: 140px;
 }
 
 #lumi {
@@ -91,7 +91,7 @@ ul li a:hover {
 #baro {
 	position: absolute;
 	top: 10px;
-	left: 370px;
+	left: 360px;
 }
 
 #mtime {
