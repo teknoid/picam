@@ -1,7 +1,7 @@
 #/bin/sh
 
 WORK=/ram/webcam
-WWW=/home/www/webcam
+WWW=/xhome/www/webcam
 
 # concatenate
 for X in h l
@@ -29,4 +29,4 @@ SIZE_L=$(ls -lh $WWW/l/week.mp4)
   echo $SIZE_H
   echo $SIZE_L
   echo
-} | mail -s webcam root@jecons.de
+} | /usr/bin/mail -s webcam root@jecons.de

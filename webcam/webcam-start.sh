@@ -1,11 +1,11 @@
 #/bin/sh
 
-# 59 4	* * *	hje	/home/www/webcam/webcam-start.sh reset
+# 59 4	* * *	hje	/xhome/www/webcam/webcam-start.sh reset
 
 DATE=$(date +"%Y%m%d")
 YEAR=$(date +"%Y")
 
-WWW=/home/www/webcam
+WWW=/xhome/www/webcam
 WORK=/ram/webcam
 
 DEV=/dev/video0
@@ -50,7 +50,7 @@ fi
 v4l2-ctl -d $DEV -l 2>&1 1>/dev/null
 v4l2-ctl -d $DEV --set-fmt-video=width=1280,height=720,pixelformat=MJPG
 
-uvccapture $OPTS -o$WORK/current.jpg -c/home/www/webcam/postprocess.sh &
+uvccapture $OPTS -o$WORK/current.jpg -c$WWW/postprocess.sh &
 sleep 1
 echo start uvccapture process $(pidof uvccapture)
 

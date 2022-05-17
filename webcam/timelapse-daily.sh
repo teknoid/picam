@@ -1,7 +1,7 @@
 #/bin/sh
 
 WORK=/ram/webcam
-WWW=/home/www/webcam
+WWW=/xhome/www/webcam
 
 case "$HOSTNAME" in
   nanopct4)
@@ -67,4 +67,4 @@ LAST=$(ls -la $WORK/d/*.jpg | tail -n 1)
   echo $FIRST
   echo $LAST
   echo
-} | mail -s webcam root@jecons.de
+} | /usr/bin/mail -s webcam root@jecons.de

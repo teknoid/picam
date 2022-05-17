@@ -1,7 +1,7 @@
 #/bin/sh
 
 WORK=/ram/webcam
-WWW=/home/www/webcam
+WWW=/xhome/www/webcam
 
 case "$HOSTNAME" in
   nanopct4)
@@ -50,4 +50,4 @@ SIZE_L=$(ls -lh $FILE)
   echo $SIZE_H
   echo $SIZE_L
   echo
-} | mail -s webcam root@jecons.de
+} | /usr/bin/mail -s webcam root@jecons.de

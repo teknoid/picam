@@ -58,6 +58,6 @@ install-service:
 
 install-webcam:
 	@echo "[Installing webcam module]"
-	mkdir -p /home/www/webcam
-	cp -arv webcam/* /home/www/webcam
-	chown -R www-data.www-data /home/www/webcam
+	mkdir -p /xhome/www/webcam
+	cp -arv webcam/* /xhome/www/webcam
+	chown -R www-data.www-data /xhome/www/webcam

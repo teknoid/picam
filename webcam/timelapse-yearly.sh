@@ -1,7 +1,7 @@
 #/bin/sh
 
 WORK=/ram/webcam
-WWW=/home/www/webcam
+WWW=/xhome/www/webcam
 OPTS="-loglevel error -f image2 -r 5"
 
 H="1280:720"
@@ -35,9 +35,11 @@ do
 done
 
 # report
-echo
-echo timelapse-yearly
-echo ------------------------------------------------------------------------
-ls -lh $WWW/h/year-*.mp4
-ls -lh $WWW/l/year-*.mp4
-echo
+{
+  echo
+  echo timelapse-yearly
+  echo ------------------------------------------------------------------------
+  ls -lh $WWW/h/year-*.mp4
+  ls -lh $WWW/l/year-*.mp4
+  echo
+} | /usr/bin/mail -s webcam root@jecons.de
