@@ -1,6 +1,8 @@
-CFLAGS = -Wall
+INCLUDE = ./include
+LIB = ./lib
 
-LIBS = -lpthread -lrt -lm
+CFLAGS = -I$(INCLUDE) -Wall
+LIBS = -L$(LIB) -lpthread -lrt -lm -lmqttc
 
 SRCS = $(wildcard *.c)
 OBJS = $(SRCS:.c=.o)
@@ -29,7 +31,7 @@ gpio-bcm2835: gpio-bcm2835.o
 	$(CC) $(CFLAGS) -DGPIO_MAIN -c gpio-bcm2835.c -Wno-unused-function 
 	$(CC) $(CFLAGS) -o gpio-bcm2835 gpio-bcm2835.o
 
-flamingo-old: flamingo-old.c utils.o
+flamingo-old: flamingo-old.o utils.o
 	$(CC) $(CFLAGS) -o flamingo-old flamingo-old.c utils.o $(LIBS) -lwiringPi
 
 .c.o:

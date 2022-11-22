@@ -2,7 +2,7 @@
 <?php
 header('Content-Type: application/json');
 
-$source = '/ram/433/433.json';
+$source = '/ram/mqtt/433/433.json';
 
 $exclude = array(
     'Acurite-986',
@@ -52,8 +52,8 @@ if (file_exists($source)) {
     while (($line = fgets($handle)) !== false) {
         $in = json_decode($line, true);
 
-        $model = $in['model'];
-        $id = $in['id'];
+        $id = isset($in['id']) ? $in['id'] : '';
+        $model = isset($in['model']) ? $in['model'] : '';
 
         if (empty($model))
             continue;
