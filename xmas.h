@@ -9,10 +9,10 @@ typedef struct timing_t {
 	char channel;							// channel of remote control unit
 } timing_t;
 
-// light on: ↑later ↓earlier
+// light on: ↑earlier, ↓later
 #define XMAS_SUNDOWN	100
 
-// light off: ↑earlier, ↓later
+// light off: ↑later ↓earlier
 #define XMAS_SUNRISE	200
 
 // the remote control unit
