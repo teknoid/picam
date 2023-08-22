@@ -1,3 +1,15 @@
+// odroid
+// #define TX				219
+// #define RX				247
+
+// picam
+#define TX				"GPIO04"
+#define RX				"GPIO17"
+
+// pidev
+// #define TX					"GPIO17"
+// #define RX					"GPIO27"
+
 #define SPACEMASK_FA500		0x01000110
 #define SPACEMASK_SF500		0x00010110
 
@@ -43,7 +55,6 @@ const static uint16_t T3SMAX = T3S + 50;
 
 int flamingo_init();
 void flamingo_close();
-void flamingo_config(void *master);
 
 void flamingo_send_FA500(int remote, char channel, int command, int rolling);
 void flamingo_send_SF500(int remote, char channel, int command);

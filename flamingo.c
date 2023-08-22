@@ -23,14 +23,55 @@
 
 #include "gpio.h"
 #include "utils.h"
-#include "rfsniffer.h"
-#include "rfcodec.h"
 #include "flamingo.h"
 
-#define TX	"GPIO17"
-#define RX	"GPIO27"
+// flamingo encryption key
+static const uint8_t CKEY[16] = { 9, 6, 3, 8, 10, 0, 2, 12, 4, 14, 7, 5, 1, 15, 11, 13 };
 
-static rfsniffer_config_t *cfg;
+static uint32_t encrypt(uint32_t message) {
+	uint32_t code = 0;
+	uint8_t n[7];
+	int i, r, idx;
+
+	// split into nibbles
+	for (i = 0; i < sizeof(n); i++)
+		n[i] = message >> (4 * i) & 0x0F;
+
+	// XOR encryption 2 rounds
+	for (r = 0; r <= 1; r++) {					// 2 encryption rounds
+		idx = (n[0] - r + 1) & 0x0F;
+		n[0] = CKEY[idx];						// encrypt first nibble
+		for (i = 1; i <= 5; i++) {				// encrypt 4 nibbles
+			idx = ((n[i] ^ n[i - 1]) - r + 1) & 0x0F;
+			n[i] = CKEY[idx];					// crypted with predecessor & key
+		}
+	}
+	n[6] = n[6] ^ 9;							// no  encryption
+
+	// build encrypted message
+	code = (n[6] << 24) | (n[5] << 20) | (n[4] << 16) | (n[3] << 12) | (n[2] << 8) | (n[1] << 4) | n[0];
+
+	// shift 2 bits right & copy lowest 2 bits of n[0] in msg bit 27/28
+	code = (code >> 2) | ((code & 3) << 0x1A);
+
+	return code;
+}
+
+static uint32_t flamingo28_encode(uint16_t xmitter, char channel, char command, char payload, char rolling) {
+	uint32_t message = (payload & 0x0F) << 24 | xmitter << 8 | (rolling << 6 & 0xC0) | (command & 0x03) << 4 | (channel & 0x0F);
+	uint32_t code = encrypt(message);
+	return code;
+}
+
+static uint32_t flamingo32_encode(uint16_t xmitter, char channel, char command, char payload) {
+	uint32_t message = (payload & 0x0F) << 24 | xmitter << 8 | (command & 0x0F) << 4 | (channel & 0x0F);
+	return message;
+}
+
+// TODO
+static uint32_t flamingo24_encode(uint16_t xmitter, char channel, char command, char payload) {
+	return 0;
+}
 
 #ifdef FLAMINGO_MAIN
 static int usage() {
@@ -108,56 +149,46 @@ void flamingo_send_FA500(int remote, char channel, int command, int rolling) {
 	if (0 <= rolling && rolling <= 4) {
 		// send specified rolling code
 		uint32_t c28 = flamingo28_encode(transmitter, channel - 'A' + 1, command ? 2 : 0, 0, rolling);
-		gpio_flamingo_v1(cfg->tx, c28, 28, 4, T1);
+		gpio_flamingo_v1(TX, c28, 28, 4, T1);
 
 		uint32_t m32 = flamingo32_encode(transmitter, channel - 'A' + 1, command, 0);
-		gpio_flamingo_v2(cfg->tx, m32, 32, 3, T2H, T2L);
+		gpio_flamingo_v2(TX, m32, 32, 3, T2H, T2L);
 	} else {
 		// send all rolling codes in sequence
 		for (int r = 0; r < 4; r++) {
 			uint32_t c28 = flamingo28_encode(transmitter, channel - 'A' + 1, command ? 2 : 0, 0, r);
-			gpio_flamingo_v1(cfg->tx, c28, 28, 4, T1);
+			gpio_flamingo_v1(TX, c28, 28, 4, T1);
 
 			uint32_t m32 = flamingo32_encode(transmitter, channel - 'A' + 1, command, 0);
-			gpio_flamingo_v2(cfg->tx, m32, 32, 3, T2H, T2L);
+			gpio_flamingo_v2(TX, m32, 32, 3, T2H, T2L);
 			sleep(1);
 		}
 	}
 }
 
+// TODO
 void flamingo_send_SF500(int remote, char channel, int command) {
 	if (remote < 1 || remote > ARRAY_SIZE(REMOTES))
 		return;
 
 	uint16_t transmitter = REMOTES[remote - 1];
 	uint32_t message = flamingo24_encode(transmitter, channel - 'A' + 1, command, 0);
-	gpio_flamingo_v2(cfg->tx, message, 32, 5, T2H, T2L);
+	gpio_flamingo_v2(TX, message, 32, 5, T2H, T2L);
 }
 
 int flamingo_init() {
-	if (gpio_init() < 0)
-		return -1;
-
 	// elevate realtime priority for sending thread
 	if (elevate_realtime(3) < 0)
 		return -2;
 
-	// initialize a default configuration if not yet done
-	if (cfg == NULL)
-		cfg = rfsniffer_default_config();
-
 	// GPIO pin connected to 433MHz receiver+sender module
-	gpio_configure(cfg->rx, 0, 0, 0);
-	gpio_configure(cfg->tx, 1, 0, 0);
+	gpio_configure(RX, 0, 0, 0);
+	gpio_configure(TX, 1, 0, 0);
 
 	return 0;
 }
 
 void flamingo_close() {
-}
-
-void flamingo_config(void *master) {
-	cfg = (rfsniffer_config_t*) master;
 }
 
 #ifdef FLAMINGO_MAIN

@@ -8,24 +8,19 @@ SRCS = $(wildcard *.c)
 OBJS = $(SRCS:.c=.o)
 
 COBJS-COMMON	= utils.o
-COBJS-RFSNIFFER	= rfsniffer.o rfsniffer-stream.o rfsniffer-realtime.o rfcodec.o rfcodec-nexus.o rfcodec-flamingo.o 
 
-all: clean mcp sensors flamingo rfsniffer gpio-bcm2835
+all: clean mcp sensors flamingo gpio-bcm2835
 
-mcp: mcp.o gpio-bcm2835.o sensors.o xmas.o webcam.o flamingo.o frozen.o smbus.o $(COBJS-COMMON) $(COBJS-RFSNIFFER)
-	$(CC) $(CFLAGS) -o mcp mcp.o gpio-bcm2835.o sensors.o xmas.o webcam.o flamingo.o frozen.o smbus.o $(COBJS-COMMON) $(COBJS-RFSNIFFER) $(LIBS)
+mcp: mcp.o gpio-bcm2835.o sensors.o xmas.o webcam.o flamingo.o frozen.o smbus.o $(COBJS-COMMON)
+	$(CC) $(CFLAGS) -o mcp mcp.o gpio-bcm2835.o sensors.o xmas.o webcam.o flamingo.o frozen.o smbus.o $(COBJS-COMMON) $(LIBS)
 
 sensors: sensors.o smbus.o $(COBJS-COMMON)
 	$(CC) $(CFLAGS) -DSENSORS_MAIN -c sensors.c smbus.c
 	$(CC) $(CFLAGS) -o sensors sensors.o smbus.o $(COBJS-COMMON) $(LIBS)
 
-flamingo: flamingo.o frozen.o gpio-bcm2835.o $(COBJS-COMMON) $(COBJS-RFSNIFFER)
+flamingo: flamingo.o frozen.o gpio-bcm2835.o $(COBJS-COMMON)
 	$(CC) $(CFLAGS) -DFLAMINGO_MAIN -c flamingo.c
-	$(CC) $(CFLAGS) -o flamingo flamingo.o frozen.o gpio-bcm2835.o $(COBJS-COMMON) $(COBJS-RFSNIFFER) $(LIBS)
-
-rfsniffer: frozen.o gpio-bcm2835.o $(COBJS-COMMON) $(COBJS-RFSNIFFER)
-	$(CC) $(CFLAGS) -DRFSNIFFER_MAIN -c rfsniffer.c
-	$(CC) $(CFLAGS) -o rfsniffer frozen.o gpio-bcm2835.o $(COBJS-COMMON) $(COBJS-RFSNIFFER) $(LIBS)
+	$(CC) $(CFLAGS) -o flamingo flamingo.o frozen.o gpio-bcm2835.o $(COBJS-COMMON) $(LIBS)
 
 gpio-bcm2835: gpio-bcm2835.o
 	$(CC) $(CFLAGS) -DGPIO_MAIN -c gpio-bcm2835.c -Wno-unused-function 
@@ -40,7 +35,7 @@ flamingo-old: flamingo-old.o utils.o
 .PHONY: clean install install-service install-webcam
 
 clean:
-	rm -f *.o mcp sensors flamingo rfsniffer gpio-bcm2835
+	rm -f *.o mcp sensors flamingo gpio-bcm2835
 
 install:
 	@echo "[Installing and starting mcp]"
@@ -48,7 +43,6 @@ install:
 	install -m 0755 mcp /usr/local/bin
 	install -m 0755 flamingo /usr/local/bin
 	install -m 0755 sensors /usr/local/bin
-	install -m 0755 rfsniffer /usr/local/bin
 	systemctl start mcp
 
 install-service:
