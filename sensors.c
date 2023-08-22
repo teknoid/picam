@@ -240,7 +240,7 @@ static void write_sysfslike() {
 
 int sensors_init() {
 	sensors = malloc(sizeof(*sensors));
-	memset(sensors, 0, sizeof(*sensors));
+	ZERO(sensors);
 
 	// TODO config
 	i2cfd = open(I2CBUS, O_RDWR);
